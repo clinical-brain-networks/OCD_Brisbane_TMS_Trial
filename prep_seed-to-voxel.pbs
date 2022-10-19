@@ -38,7 +38,7 @@ echo "Current subject: " ${subj}
 
 
 echo 'Preparing '$subj' for seed-to-voxel analysis'
-python ${proj_dir}code/functional/seed_to_voxel_analysis.py --subj $subj --compute_seed_corr --merge_LR_hemis --n_jobs 1
+python ${proj_dir}code/functional/seed_to_voxel_analysis.py --subj $subj --compute_seed_corr --n_jobs 1 --atlas schaefer400_tianS4 --seed_type TianS4
 
 
 #echo 'Preparing for SPM '${subj}
