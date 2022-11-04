@@ -50,6 +50,7 @@ warnings.filterwarnings('once')
 # get computer name to set paths
 if platform.node()=='qimr18844':
     working_dir = '/home/sebastin/working/'
+    import pingouin as pg
 elif 'hpcnode' in platform.node():
     working_dir = '/mnt/lustre/working/'
 else:
@@ -88,7 +89,7 @@ with open(atlas_cfg_path) as jsf:
     atlas_cfg = json.load(jsf)
 
 # Harrison 2009 seed locations:
-seed_loc = {'AccL':[-9,9,-8], 'AccR':[9,9,-8]}#, \
+seed_loc = {'AccR':[9,9,-8], 'AccL':[-9,9,-8] }
         #'dPutL':[-28,1,3], 'dPutR':[28,1,3], \
         #'vPutL':[-20,12,-3] , 'vPutR':[20,12,-3]} #, \
         #'dCaudL':[-13,15,9], 'dCaudR':[13,15,9]} #, \
@@ -120,7 +121,7 @@ stim_coords['subjs'] = stim_coords['P ID'].apply(lambda x : 'sub-patient'+x[-2:]
 
 seed_suffix = { 'Harrison2009': 'ns_sphere_seed_to_voxel',
                 'TianS4':'seed_to_voxel'}
-seed_ext =  { 'Harrison2009': '.nii',
+seed_ext =  { 'Harrison2009': '.nii.gz',
                 'TianS4':'.nii.gz'}
 
 def none_or_float(value):
@@ -211,7 +212,11 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
         img_space = 'MNI152NLin2009cAsym'
         bold_file = os.path.join(deriv_dir, 'post-fmriprep-fix', subj, ses, 'func', \
                                  subj+'_'+ses+'_task-rest_space-'+img_space+'_desc-'+metric+'.nii.gz')
-        bold_img = nib.load(bold_file)
+        if os.path.exists(bold_file):
+            bold_img = nib.load(bold_file)
+        else:
+            print("{} {} bold file not found, skip".format(subj, ses))
+            break
         brain_masker = NiftiMasker(smoothing_fwhm=args.brain_smoothing_fwhm, t_r=0.81, \
             low_pass=0.1, high_pass=0.01, verbose=0)
         voxels_ts = brain_masker.fit_transform(bold_img)
@@ -227,7 +232,8 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
             # extract seed timeseries and perform seed-to-voxel correlation
             for seed in seeds:
                 seed_img = atlazer.create_subatlas_img(seed)
-                seed_masker = NiftiLabelsMasker(seed_img, standardize='zscore')
+                seed_masker = NiftiLabelsMasker(seed_img, t_r=0.81, \
+                    low_pass=0.1, high_pass=0.01) #,standardize='zscore')
                 seed_ts = np.squeeze(seed_masker.fit_transform(bold_img))
                 seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)/seed_ts.shape[0]
                 seed_to_voxel_corr_img = brain_masker.inverse_transform(seed_to_voxel_corr.mean(axis=-1).T)
@@ -255,7 +261,11 @@ def sphere_seed_to_voxel(subj, ses, seeds, metrics, atlases=['Harrison2009'], ar
         #                       subj+'_task-rest_space-'+img_space+'_desc-'+metric+'_scrub.nii.gz')
         bold_file = os.path.join(deriv_dir, 'post-fmriprep-fix', subj, ses, 'func', \
                                  subj+'_'+ses+'_task-rest_space-'+img_space+'_desc-'+metric+'.nii.gz')
-        bold_img = nib.load(bold_file)
+        if os.path.exists(bold_file):
+            bold_img = nib.load(bold_file)
+        else:
+            print("{} {} bold file not found, skip".format(subj, ses))
+            break
         brain_masker = NiftiMasker(smoothing_fwhm=args.brain_smoothing_fwhm, t_r=0.81, \
             low_pass=0.1, high_pass=0.01, verbose=0)
         voxels_ts = brain_masker.fit_transform(bold_img)
@@ -268,7 +278,7 @@ def sphere_seed_to_voxel(subj, ses, seeds, metrics, atlases=['Harrison2009'], ar
             seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)/seed_ts.shape[0]
             seed_to_voxel_corr_img = brain_masker.inverse_transform(seed_to_voxel_corr)
             fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-            fname = '_'.join([subj,ses,metric,fwhm,atlas,seed,'corr.nii.gz'])
+            fname = '_'.join([subj,ses,metric,fwhm,atlas,seed,seed_suffix[args.seed_type],'corr.nii.gz'])
             nib.save(seed_to_voxel_corr_img, os.path.join(out_dir, fname))
     print('{} seed_to_voxel correlation performed in {}s'.format(subj,int(time()-t0)))
 
@@ -292,7 +302,11 @@ def merge_LR_hemis(subjs, seeds, seses, metrics, seed_type='sphere_seed_to_voxel
                 fnames = [os.path.join(proj_dir, 'postprocessing', subj,
                                        '_'.join([subj,ses,metric,fwhm,atlas,seed+hemi,seed_suffix[args.seed_type],'corr.nii.gz']))
                           for hemi in hemis]
-                new_img = nilearn.image.mean_img(fnames)
+                if os.path.exists(fnames[0]):
+                    new_img = nilearn.image.mean_img(fnames)
+                else:
+                    print("{} not found, skip".format(fnames[0]))
+                    break
                 #fname = s+'_detrend_gsr_filtered_'+seed+'_sphere_seed_to_voxel_corr.nii'
                 fname = '_'.join([subj,ses,metric,fwhm,atlas,seed,seed_suffix[args.seed_type],'corr.nii.gz'])
                 os.makedirs(os.path.join(args.in_dir, metric, fwhm, seed, group), exist_ok=True)
@@ -610,7 +624,7 @@ def get_subj_stim_mask(subj, args):
         return None,None
     stim_mask = nltools.create_sphere(np.array([l['x'], l['y'], l['z']]).flatten(), radius=args.stim_radius)
     stim_masker = NiftiSpheresMasker([np.array([l['x'], l['y'], l['z']]).flatten()], radius=args.stim_radius,
-                                     smoothing_fwhm=args.brain_smoothing_fwhm, t_r=0.83, low_pass=0.25, standardize=False)
+                                     smoothing_fwhm=args.brain_smoothing_fwhm, t_r=0.81, low_pass=0.25, standardize=False)
     return stim_mask, stim_masker
 
 
@@ -636,13 +650,23 @@ def compute_voi_corr(subjs, seeds = ['Acc', 'dPut', 'vPut'], args=None):
                 pre = post = 0
                 for ses in args.seses:
                     # load correlation map
-                    fname = '_'.join([subj, ses, metric, fwhm, atlas, seed, seed_suffix[args.seed_type], 'corr'+seed_ext[args.seed_type]])
-                    fpath = os.path.join(proj_dir, 'postprocessing/SPM/input_imgs', args.seed_type, 'seed_not_smoothed',
-                                    metric, fwhm, seed, group, fname)
+                    if args.unilateral_seed:
+                        fname = '_'.join([subj, ses, metric, fwhm, atlas, seed, seed_suffix[args.seed_type], 'corr'+seed_ext[args.seed_type]])
+                        fpath = os.path.join(proj_dir, 'postprocessing', subj, fname+'.gz')
+                    else:
+                        fname = '_'.join([subj, ses, metric, fwhm, atlas, seed, seed_suffix[args.seed_type], 'corr'+seed_ext[args.seed_type]])
+                        fpath = os.path.join(proj_dir, 'postprocessing/SPM/input_imgs', args.seed_type, 'seed_not_smoothed',
+                                        metric, fwhm, seed, group, fname)
                     if os.path.exists(fpath):
                         corr_map = load_img(fpath)
                     else:
-                        continue
+                        print("{} {} FC file not found, skip.\n{}".format(subj, ses, fpath))
+                        pre=np.nan
+                        post=np.nan
+                        if ses=='ses-post':
+                            dfs = dfs[:-1]
+                        break
+
                     # load voi mask
                     #voi_mask = load_img(os.path.join(proj_dir, 'utils', 'frontal_'+seed+'_mapping_AND_mask_stim_VOI_5mm.nii.gz'))
                     voi_mask = resample_to_img(voi_mask, corr_map, interpolation='nearest')
@@ -1114,9 +1138,9 @@ def compute_ALFF(subjs, args=None):
         ts = stim_masker.transform_single_imgs(bold_file)
         #stim_mask = resample_to_img(stim_mask, bold_file, interpolation='nearest')
         #ts = nilearn.masking.apply_mask(bold_file, stim_mask, smoothing_fwhm=args.brain_smoothing_fwhm)
-        #freqs, Pxx = scipy.signal.welch(ts.squeeze().astype(np.float64), fs=1./0.83, scaling='spectrum')
-        #freqs, Pxx = scipy.signal.periodogram(ts.squeeze().astype(float), fs=1./0.83, scaling='spectrum', detrend=False, window='hann')
-        Pxx, freqs = plt.psd(ts.squeeze());
+        #freqs, Pxx = scipy.signal.welch(ts.squeeze().astype(np.float64), fs=1./0.81, scaling='spectrum')
+        #freqs, Pxx = scipy.signal.periodogram(ts.squeeze().astype(float), fs=1./0.81, scaling='spectrum', detrend=False, window='hann')
+        Pxx, freqs = plt.psd(ts.squeeze(), Fs=1./0.81);
         if np.isnan(Pxx).any():
             print(subj +' PSD has NaNs, discard.')
             continue
@@ -1156,7 +1180,184 @@ def plot_ALFF(df_summary, args):
 
 def compute_diff_ALFF(df_alff, args):
     """ t-test on individual's ALFF at sim site """
+    return
 
+def compute_nbs(subjs, args):
+    """ Network Based Statistics """
+    g1=[]
+    g2=[]
+    for subj in subjs:
+        group = get_group(subj)
+        fname = subj+'_ses-pre_task-rest_atlas-Schaefer2018_400_17+Tian_S4_desc-corr-detrend_filtered_scrub_gsr.h5'
+        fpath = os.path.join('/home/sebastin/working/lab_lucac/shared/projects/ocd_clinical_trial/data/derivatives/post-fmriprep-fix/'+subj+'/ses-pre/fc', fname)
+        if os.path.exists(fpath):
+            with h5py.File(fpath, 'r') as f:
+                pre = f['fc'][()]
+        else:
+            print(subj +' file not found, discard.')
+            continue
+        fname = subj+'_ses-post_task-rest_atlas-Schaefer2018_400_17+Tian_S4_desc-corr-detrend_filtered_scrub_gsr.h5'
+        fpath = os.path.join('/home/sebastin/working/lab_lucac/shared/projects/ocd_clinical_trial/data/derivatives/post-fmriprep-fix/'+subj+'/ses-post/fc', fname)
+        if os.path.exists(fpath):
+            with h5py.File(fpath, 'r') as f:
+                post = f['fc'][()]
+        else:
+            print(subj +' file not found, discard.')
+            continue
+        if group=='group1':
+            g1.append(pre-post)
+        elif group=='group2':
+            g2.append(pre-post)
+        else:
+            print(subj +' not in any group, discard.')
+            continue
+    pval, adj, null = bct.nbs_bct(np.array(g1).T, np.array(g2).T, thresh=3.5)
+    return pval, adj, null
+
+def plot_pointplot(df_summary, args):
+    """ Show indiviudal subject point plot for longitudinal display """
+    plt.rcParams.update({'font.size': 16})
+    df_summary = df_summary[df_summary['ses']!='pre-post']
+    for i,var in enumerate(['corr', 'fALFF']):
+        fig = plt.figure(figsize=[8,4])
+
+        ax1 = plt.subplot(1,2,1)
+        ax1.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+
+        ax2 = plt.subplot(1,2,2)
+        ax2.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
+        ax2.spines['left'].set_visible(False)
+        ax2.set_yticklabels(labels=[], visible=False)
+        ax2.set_ylabel('', visible=False)
+        ax2.set_yticks([])
+
+        for subj in df_summary.subj.unique():
+            if str(df_summary[df_summary['subj']==subj].group.unique().squeeze()) == 'group1':
+                plt.sca(ax2)
+            else:
+                plt.sca(ax1)
+            sbn.pointplot(data=df_summary[df_summary['subj']==subj], x='ses', y=var, dodge=(np.random.rand()-0.5), color=group_colors[get_group(subj)], linewidth=0.5, alpha=0.5)
+
+        plt.setp(ax1.lines, linewidth=0.75)
+        plt.setp(ax1.collections, sizes=[10])
+        plt.setp(ax2.lines, linewidth=0.75)
+        plt.setp(ax2.collections, sizes=[10])
+        if var=='corr':
+            ax1.set_xticklabels([])
+            ax1.set_xlabel('')
+            ax1.set_xticks([])
+            ax1.spines['bottom'].set_visible(False)
+            ax1.set_title('Sham')
+            ax2.set_xticklabels([])
+            ax2.set_xticks([])
+            ax2.set_xlabel('')
+            ax2.spines['bottom'].set_visible(False)
+            ax2.set_title('Active')
+        else:
+            ax1.set_xticklabels(['Baseline', 'post-cTBS'])
+            #ax1.set_xlabel('Session')
+            ax2.set_xticklabels(['Baseline', 'post-cTBS'])
+            #ax2.set_xlabel('Session')
+        plt.tight_layout()
+
+        if args.save_figs:
+            fname = '_'.join(['point_plot',var,'indStim',datetime.now().strftime('%d%m%Y.pdf')])
+            plt.savefig(os.path.join(proj_dir, 'img', fname))
+
+        if args.plot_figs:
+            plt.show(block=False)
+        else:
+            plt.close(fig)
+
+
+def plot_pointplot_v2(df_summary, args):
+    """ Show indiviudal subject point plot for longitudinal display """
+    plt.rcParams.update({'font.size': 16})
+    df_summary = df_summary[df_summary['ses']!='pre-post']
+    for i,var in enumerate(['corr', 'fALFF']):
+        fig = plt.figure(figsize=[6,4])
+        for i,group in enumerate(['group1', 'group2']):
+            ax = plt.subplot(1,2,i+1)
+        #    sbn.pointplot(data=df_summary[df_summary.group==group], x='ses', y=var, hue='subj',  dodge=0.1*(np.random.rand()-0.5), color=group_colors[group], linewidth=0.5, alpha=0.5)
+        #sbn.pointplot(data=df_summary, x='ses', y=var, hue='group',  dodge=0.1*(np.random.rand()-0.5), linewidth=0.5, alpha=0.5)
+            sbn.violinplot(data=df_summary[df_summary.group==group], x='group', y=var, hue='ses', dodge=True, split=True, palette={'ses-pre':group_colors[group], 'ses-post':group_colors[group]}, linewidth=1, inner='quartile')
+            plt.setp(ax.collections, alpha=.5)
+            plt.legend().set_visible(False)
+            #plt.legend(bbox_to_anchor=(1.05, 0.8), loc='upper right', borderaxespad=0)
+
+        ax1 = plt.subplot(1,2,1)
+        ax1.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        ax1.set_title('Active')
+
+        ax2 = plt.subplot(1,2,2)
+        ax2.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
+        ax2.spines['left'].set_visible(False)
+        ax2.set_yticklabels(labels=[], visible=False)
+        ax2.set_ylabel('', visible=False)
+        ax2.set_yticks([])
+        ax2.set_title('Sham')
+        plt.tight_layout()
+
+        if args.save_figs:
+            fname = '_'.join(['violin_plot',var,'indStim',datetime.now().strftime('%d%m%Y.pdf')])
+            plt.savefig(os.path.join(proj_dir, 'img', fname))
+
+        if args.plot_figs:
+            plt.show(block=False)
+        else:
+            plt.close(fig)
+
+
+def print_stats(df_summary, args):
+    """ print stats of pre vs post variables """
+    df_summary.dropna(inplace=True)
+    for var in ['corr', 'fALFF']:
+
+        df_pre = df_summary[(df_summary['ses']=='ses-pre')]
+        df_post = df_summary[(df_summary['ses']=='ses-post')]
+        diff_corr = np.array(df_pre['corr']) - np.array(df_post['corr'])
+        diff_fALFF = np.array(df_pre['fALFF']) - np.array(df_post['fALFF'])
+        diff_ybocs = np.array(df_pre['YBOCS_Total']) - np.array(df_post['YBOCS_Total'])
+
+        r,p = scipy.stats.pearsonr(diff_corr, diff_ybocs)
+        print('Delta FC-YBOCS correlation across groups: r={:.2f}, p={:.3f}'.format(r,p))
+
+        r,p = scipy.stats.pearsonr(diff_fALFF, diff_ybocs)
+        print('Delta fALFF-YBOCS correlation in across groups: r={:.2f}, p={:.3f}'.format(r,p))
+
+        for group in df_summary.group.unique():
+            t,p = scipy.stats.ttest_ind(np.array(df_summary[(df_summary['ses']=='ses-pre') & (df_summary['group']==group)][var]), np.array(df_summary[(df_summary['ses']=='ses-post') & (df_summary['group']==group)][var]) )
+            print('{} pre-post {}  t={:.2f}  p={:.3f}'.format(var, group, t, p))
+
+            df_pre = df_summary[(df_summary['ses']=='ses-pre') & (df_summary['group']==group)]
+            df_post = df_summary[(df_summary['ses']=='ses-post') & (df_summary['group']==group)]
+            diff_corr = np.array(df_pre['corr']) - np.array(df_post['corr'])
+            diff_fALFF = np.array(df_pre['fALFF']) - np.array(df_post['fALFF'])
+            diff_ybocs = np.array(df_pre['YBOCS_Total']) - np.array(df_post['YBOCS_Total'])
+
+            r,p = scipy.stats.pearsonr(diff_corr, diff_ybocs)
+            print('Delta FC-YBOCS correlation in {}: r={:.2f}, p={:.3f}'.format(group,r,p))
+
+            r,p = scipy.stats.pearsonr(diff_fALFF, diff_ybocs)
+            print('Delta fALFF-YBOCS correlation in {}: r={:.2f}, p={:.3f}'.format(group,r,p))
+
+            t,p = scipy.stats.ttest_ind(df_pre['YBOCS_Total'], df_post['YBOCS_Total'])
+            print('YBOCS pre-post stats in {}: t={:.2f}, p={:.3f}'.format(group,t,p))
+
+        print(var)
+        mixed = pg.mixed_anova(data=df_summary[df_summary.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
+        pg.print_table(mixed)
+
+        posthocs = pg.pairwise_ttests(data=df_summary[df_summary.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
+        pg.print_table(posthocs)
 
 
 if __name__=='__main__':
@@ -1209,6 +1410,10 @@ if __name__=='__main__':
     parser.add_argument('--compute_f_contrasts', default=False, action='store_true', help="computes F contrasts in randomise")
     parser.add_argument('--permuteBlocks', default=False, action='store_true', help="permute whole exchangability blocks rather than within blocks")
     parser.add_argument('--use_group_avg_stim_site', default=False, action='store_true', help='use a seed-spefici frontal gm mask to reduce the space of the second level analysis')
+    parser.add_argument('--compute_nbs', default=False, action='store_true', help="computes the network based statistics")
+    parser.add_argument('--unilateral_seed', default=False, action='store_true', help="compute FC stats using only seed from one side (must be specified in header seed_loc)")
+    parser.add_argument('--plot_pointplot', default=False, action='store_true', help="plot VOI correlation and fALFF pointplot (pre vs post)")
+    parser.add_argument('--print_stats', default=False, action='store_true', help="print mixed ANOVA stats (group by session) and other stats (deltas YBOCS, FC, etc)")
     args = parser.parse_args()
 
     if args.subj!=None:
@@ -1221,7 +1426,7 @@ if __name__=='__main__':
     atlases = [args.atlas]
     #metrics = ['detrend_filtered', 'detrend_gsr_filtered']
     pre_metric = 'seed_not_smoothed' #'unscrubbed_seed_not_smoothed'
-    metrics = ['detrend_gsr_filtered_scrubFD05'] #'detrend_gsr_smooth-6mm', 'detrend_gsr_filtered_scrubFD06'
+    metrics = ['detrend_filtered_scrubFD05'] #'detrend_gsr_smooth-6mm', 'detrend_gsr_filtered_scrubFD06'
     seses = ['ses-pre', 'ses-post']
 
     args.atlases = atlases
@@ -1236,6 +1441,8 @@ if __name__=='__main__':
     #seeds = list(seed_loc.keys()) #['AccL', 'AccR', 'dCaudL', 'dCaudR', 'dPutL', 'dPutR', 'vPutL', 'vPutR', 'vCaudSupL', 'vCaudSupR', 'drPutL', 'drPutR']
     #subrois = np.unique([seed[:-1] for seed in seeds])#['Acc', 'dCaud', 'dPut', 'vPut', 'drPut']
     seeds, subrois = get_seed_names(args)
+    if args.unilateral_seed:
+        subrois = seeds
 
     seedfunc = {'Harrison2009':sphere_seed_to_voxel,
             'TianS4':seed_to_voxel}
@@ -1287,7 +1494,14 @@ if __name__=='__main__':
         plot_voi_corr(df_voi_corr, seeds=subrois, args=args)
 
         if args.save_outputs:
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr.pkl'), 'wb') as f:
+            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+            if args.unilateral_seed:
+                save_suffix += '_unilateral'
+            else:
+                save_suffix += '_bilateral'
+            if not args.use_group_avg_stim_site:
+                save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr'+save_suffix+'.pkl'), 'wb') as f:
                 pickle.dump(df_voi_corr,f)
 
     if args.non_parametric_analysis:
@@ -1317,6 +1531,41 @@ if __name__=='__main__':
         df_summary = pd.merge(df_alff, df_groups)
         if args.plot_figs:
             plot_ALFF(df_summary, args)
+
         if args.save_outputs:
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff.pkl'), 'wb') as f:
+            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+            if not args.use_group_avg_stim_site:
+                save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff'+save_suffix+'.pkl'), 'wb') as f:
                 pickle.dump(df_summary,f)
+
+    if args.compute_nbs:
+        df_nbs = compute_nbs(subjs, args)
+
+    if args.plot_pointplot:
+        # loadings
+        if 'df_alff' not in locals():
+            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+            if not args.use_group_avg_stim_site:
+                save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff'+save_suffix+'.pkl'), 'rb') as f:
+                df_alff = pickle.load(f)
+        if 'df_voi_corr' not in locals():
+            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+            if args.unilateral_seed:
+                save_suffix += '_unilateral'
+            else:
+                save_suffix += '_bilateral'
+            if not args.use_group_avg_stim_site:
+                save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr'+save_suffix+'.pkl'), 'rb') as f:
+                df_voi_corr = pickle.load(f)
+        with open(os.path.join(proj_dir, 'postprocessing', 'df_pat.pkl'), 'rb') as f:
+            df_pat = pickle.load(f)
+        df_summary = df_alff.merge(df_voi_corr).merge(df_pat)
+        # plotting
+        plot_pointplot(df_summary, args)
+
+    # stats
+    if args.print_stats:
+        print_stats(df_summary, args)
