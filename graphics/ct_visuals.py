@@ -24,7 +24,6 @@ from nilearn.input_data import NiftiMasker, NiftiLabelsMasker
 import numpy as np
 import os
 import pandas as pd
-import pingouin as pg
 import pdb
 import pickle
 import pyvista as pv
@@ -99,8 +98,9 @@ imgs_info = {   'base': {       'path': os.path.join(proj_dir, 'utils', 'empty.n
 
 group_colors = {'group1': 'orange', 'group2':'lightslategray'}
 
-pointplot_ylim = {'corr': [-1,1], 'fALFF':[0.003,0.02]}
-
+pointplot_ylim = {  'Harrison2009': {'corr': [-1,1], 'fALFF':[0.0,0.03]},
+                    'TianS4': {'corr': [-0.01,0.01], 'fALFF':[0.0,0.03]},
+                }
 
 # Additionally, all the modules other than ipygany and pythreejs require a framebuffer, which can be setup on a headless environment with pyvista.start_xvfb().
 pv.start_xvfb()
@@ -233,95 +233,6 @@ def get_stim_spheres(args):
     return stim_spheres
 
 
-def plot_pointplot(df_summary, args):
-    """ Show indiviudal subject point plot for longitudinal display """
-    plt.rcParams.update({'font.size': 16})
-    df_summary = df_summary[df_summary['ses']!='pre-post']
-    for i,var in enumerate(['corr', 'fALFF']):
-        fig = plt.figure(figsize=[8,4])
-
-        ax1 = plt.subplot(1,2,1)
-        ax1.set_ylim(pointplot_ylim[var])
-        ax1.spines['top'].set_visible(False)
-        ax1.spines['right'].set_visible(False)
-
-        ax2 = plt.subplot(1,2,2)
-        ax2.set_ylim(pointplot_ylim[var])
-        ax2.spines['top'].set_visible(False)
-        ax2.spines['right'].set_visible(False)
-        ax2.spines['left'].set_visible(False)
-        ax2.set_yticklabels(labels=[], visible=False)
-        ax2.set_ylabel('', visible=False)
-        ax2.set_yticks([])
-
-        for subj in df_summary.subj.unique():
-            if str(df_summary[df_summary['subj']==subj].group.unique().squeeze()) == 'group1':
-                plt.sca(ax1)
-            else:
-                plt.sca(ax2)
-            sbn.pointplot(data=df_summary[df_summary['subj']==subj], x='ses', y=var, dodge=True, color=group_colors[get_group(subj)], linewidth=0.5, alpha=0.5)
-        plt.setp(ax1.lines, linewidth=0.75)
-        plt.setp(ax1.collections, sizes=[10])
-        plt.setp(ax2.lines, linewidth=0.75)
-        plt.setp(ax2.collections, sizes=[10])
-        if var=='corr':
-            ax1.set_xticklabels([])
-            ax1.set_xlabel('')
-            ax1.set_xticks([])
-            ax1.spines['bottom'].set_visible(False)
-            ax1.set_title('Active')
-            ax2.set_xticklabels([])
-            ax2.set_xticks([])
-            ax2.set_xlabel('')
-            ax2.spines['bottom'].set_visible(False)
-            ax2.set_title('Sham')
-        else:
-            ax1.set_xticklabels(['Baseline', 'post-cTBS'])
-            #ax1.set_xlabel('Session')
-            ax2.set_xticklabels(['Baseline', 'post-cTBS'])
-            #ax2.set_xlabel('Session')
-        plt.tight_layout()
-
-        if args.save_figs:
-            fname = '_'.join(['point_plot',var,'indStim',datetime.now().strftime('%d%m%Y.pdf')])
-            plt.savefig(os.path.join(proj_dir, 'img', fname))
-
-        if args.plot_figs:
-            plt.show(block=False)
-        else:
-            plt.close(fig)
-
-def print_stats(df_summary, args):
-    """ print stats of pre vs post variables """
-    df_summary.dropna(inplace=True)
-    for var in ['corr', 'fALFF']:
-
-        for group in df_summary.group.unique():
-            t,p = scipy.stats.ttest_ind(np.array(df_summary[(df_summary['ses']=='ses-pre') & (df_summary['group']==group)][var]), np.array(df_summary[(df_summary['ses']=='ses-post') & (df_summary['group']==group)][var]) )
-            print('{} pre-post {}  t={:.2f}  p={:.3f}'.format(var, group, t, p))
-
-            df_pre = df_summary[(df_summary['ses']=='ses-pre') & (df_summary['group']==group)]
-            df_post = df_summary[(df_summary['ses']=='ses-post') & (df_summary['group']==group)]
-            diff_corr = np.array(df_pre['corr']) - np.array(df_post['corr'])
-            diff_fALFF = np.array(df_pre['fALFF']) - np.array(df_post['fALFF'])
-            diff_ybocs = np.array(df_pre['YBOCS_Total']) - np.array(df_post['YBOCS_Total'])
-
-            r,p = scipy.stats.pearsonr(diff_corr, diff_ybocs)
-            print('Delta FC-YBOCS correlation in {}: r={:.2f}, p={:.3f}'.format(group,r,p))
-
-            r,p = scipy.stats.pearsonr(diff_fALFF, diff_ybocs)
-            print('Delta fALFF-YBOCS correlation in {}: r={:.2f}, p={:.3f}'.format(group,r,p))
-
-            t,p = scipy.stats.ttest_ind(df_pre['YBOCS_Total'], df_post['YBOCS_Total'])
-            print('YBOCS pre-post stats in {}: t={:.2f}, p={:.3f}'.format(group,t,p))
-
-        print(var)
-        mixed = pg.mixed_anova(data=df_summary[df_summary.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
-        pg.print_table(mixed)
-
-        posthocs = pg.pairwise_ttests(data=df_summary[df_summary.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
-        pg.print_table(posthocs)
-
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--plot_figs', default=False, action='store_true', help='plot figures')
@@ -333,8 +244,6 @@ if __name__=='__main__':
     parser.add_argument('--stim_balls_scaling', type=float, default=1., action='store', help='scaling of coordinates of small balls at stim location to be closer to surface mesh')
     parser.add_argument('--plot_surface', default=False, action='store_true', help='plot surface mesh with stim  locations and mask')
     parser.add_argument('--smoothed_surface', default=False, action='store_true', help='use smooth cortical mesh')
-    parser.add_argument('--plot_pointplot', default=False, action='store_true', help='plot pointplot of longitudinal pre-post Acc-stimSite correlation and fALFF')
-    parser.add_argument('--print_stats', default=False, action='store_true', help='print t-tstats of correlation and fALFF pre vs post')
     args = parser.parse_args()
 
     names = ['base', 'tian_acc' ]
@@ -357,18 +266,3 @@ if __name__=='__main__':
         stim_spheres = get_stim_spheres(args)
 
         plot_surface(surfs, stim_spheres, names=names, args=args)
-
-    if args.plot_pointplot:
-        # loadings
-        with open(os.path.join(proj_dir, 'postprocessing', 'df_alff.pkl'), 'rb') as f:
-            df_alff = pickle.load(f)
-        with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr.pkl'), 'rb') as f:
-            df_voi_corr = pickle.load(f)
-        with open(os.path.join(proj_dir, 'postprocessing', 'df_pat.pkl'), 'rb') as f:
-            df_pat = pickle.load(f)
-        df_summary = df_alff.merge(df_voi_corr).merge(df_pat)
-        # stats
-        if args.print_stats:
-            print_stats(df_summary, args)
-        # plotting
-        plot_pointplot(df_summary, args)
