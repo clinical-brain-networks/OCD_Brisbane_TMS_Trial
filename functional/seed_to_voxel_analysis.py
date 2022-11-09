@@ -37,6 +37,9 @@ from scipy.io import loadmat
 from scipy import ndimage
 import seaborn as sbn
 import shutil
+import sklearn
+from sklearn.neighbors import KernelDensity
+from sklearn.model_selection import GridSearchCV
 import statsmodels
 from statsmodels.stats import multitest
 import sys
@@ -123,6 +126,13 @@ seed_suffix = { 'Harrison2009': 'ns_sphere_seed_to_voxel',
                 'TianS4':'seed_to_voxel'}
 seed_ext =  { 'Harrison2009': '.nii.gz',
                 'TianS4':'.nii.gz'}
+
+group_colors = {'group1': 'orange', 'group2':'lightslategray'}
+
+pointplot_ylim = {  'Harrison2009': {'corr': [-1,1], 'fALFF':[1,2]},
+                    'TianS4': {'corr': [-0.01,0.01], 'fALFF':[1,2]},
+                }
+
 
 def none_or_float(value):
     if value == 'None':
@@ -1128,8 +1138,12 @@ def compute_ALFF(subjs, args=None):
     """ compute Amplitude Low Frequency Fluctuation (ALFF) and fractional ALFF (fALFF) """
     dfs = []
     for subj,ses in itertools.product(subjs, args.seses):
-        fname = '_'.join([subj,ses])+'_task-rest_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz'
-        bold_file = os.path.join(proj_dir, 'data/derivatives/fmriprep-fix/', subj, ses, 'func', fname)
+        if 'gsr' in args.metrics[0]:
+            fname = '_'.join([subj,ses])+'_task-rest_space-MNI152NLin2009cAsym_desc-detrend_gsr_smooth-6mm.nii.gz'
+            bold_file = os.path.join(proj_dir, 'data/derivatives/post-fmriprep-fix/', subj, ses, 'func', fname)
+        else:
+            fname = '_'.join([subj,ses])+'_task-rest_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz'
+            bold_file = os.path.join(proj_dir, 'data/derivatives/fmriprep-fix/', subj, ses, 'func', fname)
 
         stim_mask,stim_masker = get_subj_stim_mask(subj, args)
         if ( (stim_masker == None) or not(os.path.exists(bold_file)) ) :
@@ -1138,9 +1152,10 @@ def compute_ALFF(subjs, args=None):
         ts = stim_masker.transform_single_imgs(bold_file)
         #stim_mask = resample_to_img(stim_mask, bold_file, interpolation='nearest')
         #ts = nilearn.masking.apply_mask(bold_file, stim_mask, smoothing_fwhm=args.brain_smoothing_fwhm)
-        #freqs, Pxx = scipy.signal.welch(ts.squeeze().astype(np.float64), fs=1./0.81, scaling='spectrum')
+        freqs, Pxx = scipy.signal.welch(ts.squeeze(), fs=1./0.81, scaling='spectrum', nperseg=128, noverlap=64)
         #freqs, Pxx = scipy.signal.periodogram(ts.squeeze().astype(float), fs=1./0.81, scaling='spectrum', detrend=False, window='hann')
-        Pxx, freqs = plt.psd(ts.squeeze(), Fs=1./0.81);
+        #Pxx, freqs = plt.psd(ts.squeeze(), Fs=1./0.81);
+        #Pxx = np.sqrt(Pxx)
         if np.isnan(Pxx).any():
             print(subj +' PSD has NaNs, discard.')
             continue
@@ -1214,20 +1229,44 @@ def compute_nbs(subjs, args):
     pval, adj, null = bct.nbs_bct(np.array(g1).T, np.array(g2).T, thresh=3.5)
     return pval, adj, null
 
+
+def get_kde(data, var, smoothing_factor=20, args=None):
+    """ create kernel density estimate for the data (used in violin-like plots) """
+    mn = pointplot_ylim[args.seed_type][var][0] # min
+    mx = pointplot_ylim[args.seed_type][var][1] # max
+    b = (mx-mn)/smoothing_factor
+    model = KernelDensity(bandwidth=b)
+    xtrain = np.array(data[var])[:, np.newaxis]
+    model.fit(xtrain)
+    xtest = np.linspace(mn,mx,100)[:, np.newaxis]
+    log_dens = model.score_samples(xtest)
+    mu = model.score_samples(np.array(data[var].mean()).reshape(1,1))
+    return xtest, np.exp(log_dens), np.exp(mu)
+
+
 def plot_pointplot(df_summary, args):
     """ Show indiviudal subject point plot for longitudinal display """
     plt.rcParams.update({'font.size': 16})
     df_summary = df_summary[df_summary['ses']!='pre-post']
     for i,var in enumerate(['corr', 'fALFF']):
-        fig = plt.figure(figsize=[8,4])
-
-        ax1 = plt.subplot(1,2,1)
+        fig = plt.figure(figsize=[12,4])
+        gs = plt.GridSpec(1,10)
+        # ===========
+        # point plots
+        # ===========
+        ax1 = fig.add_subplot(gs[0,1:4])
         ax1.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax1.set_xlim([-1, 1])
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
+        ax1.spines['left'].set_visible(False)
+        ax1.set_yticklabels(labels=[], visible=False)
+        ax1.set_ylabel('', visible=False)
+        ax1.set_yticks([])
 
-        ax2 = plt.subplot(1,2,2)
+        ax2 = fig.add_subplot(gs[0,6:9])
         ax2.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax2.set_xlim([-0.1, 1.1])
         ax2.spines['top'].set_visible(False)
         ax2.spines['right'].set_visible(False)
         ax2.spines['left'].set_visible(False)
@@ -1262,58 +1301,99 @@ def plot_pointplot(df_summary, args):
             #ax1.set_xlabel('Session')
             ax2.set_xticklabels(['Baseline', 'post-cTBS'])
             #ax2.set_xlabel('Session')
-        plt.tight_layout()
-
-        if args.save_figs:
-            fname = '_'.join(['point_plot',var,'indStim',datetime.now().strftime('%d%m%Y.pdf')])
-            plt.savefig(os.path.join(proj_dir, 'img', fname))
-
-        if args.plot_figs:
-            plt.show(block=False)
-        else:
-            plt.close(fig)
 
 
-def plot_pointplot_v2(df_summary, args):
-    """ Show indiviudal subject point plot for longitudinal display """
-    plt.rcParams.update({'font.size': 16})
-    df_summary = df_summary[df_summary['ses']!='pre-post']
-    for i,var in enumerate(['corr', 'fALFF']):
-        fig = plt.figure(figsize=[6,4])
-        for i,group in enumerate(['group1', 'group2']):
-            ax = plt.subplot(1,2,i+1)
-        #    sbn.pointplot(data=df_summary[df_summary.group==group], x='ses', y=var, hue='subj',  dodge=0.1*(np.random.rand()-0.5), color=group_colors[group], linewidth=0.5, alpha=0.5)
-        #sbn.pointplot(data=df_summary, x='ses', y=var, hue='group',  dodge=0.1*(np.random.rand()-0.5), linewidth=0.5, alpha=0.5)
-            sbn.violinplot(data=df_summary[df_summary.group==group], x='group', y=var, hue='ses', dodge=True, split=True, palette={'ses-pre':group_colors[group], 'ses-post':group_colors[group]}, linewidth=1, inner='quartile')
+        # ============
+        # violin plots
+        # ============
+        ax0 = fig.add_subplot(gs[0,0])
+        ax0.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax0.spines['top'].set_visible(False)
+        ax0.spines['right'].set_visible(False)
+        ax0.spines['bottom'].set_visible(False)
+        ax0.set_xticklabels(labels=[], visible=False)
+        ax0.set_xlabel('', visible=False)
+        ax0.set_xticks([])
+        data = df_summary[(df_summary.group=='group2') & (df_summary.ses=='ses-pre')]
+        x,y,mu = get_kde(data, var=var, args=args)
+        ax0.fill(-y,x, color=group_colors['group2'], alpha=0.5)
+        ax0.plot([-mu,0],[data[var].mean(), data[var].mean()], '-', color=group_colors['group2'])
+
+        ax3 = fig.add_subplot(gs[0,4])
+        ax3.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax3.spines['top'].set_visible(False)
+        ax3.spines['right'].set_visible(False)
+        ax3.spines['bottom'].set_visible(False)
+        ax3.spines['left'].set_visible(False)
+        ax3.set_xticklabels(labels=[], visible=False)
+        ax3.set_xlabel('', visible=False)
+        ax3.set_xticks([])
+        ax3.set_yticklabels(labels=[], visible=False)
+        ax3.set_ylabel('', visible=False)
+        ax3.set_yticks([])
+        data = df_summary[(df_summary.group=='group2') & (df_summary.ses=='ses-post')]
+        x,y,mu = get_kde(data, var=var, args=args)
+        ax3.fill(y,x, color=group_colors['group2'], alpha=0.5)
+        ax3.plot([0,mu],[data[var].mean(), data[var].mean()], '-', color=group_colors['group2'])
+
+        ax4 = fig.add_subplot(gs[0,5])
+        ax4.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax4.spines['top'].set_visible(False)
+        ax4.spines['right'].set_visible(False)
+        ax4.spines['bottom'].set_visible(False)
+        ax4.spines['left'].set_visible(False)
+        ax4.set_xticklabels(labels=[], visible=False)
+        ax4.set_xlabel('', visible=False)
+        ax4.set_xticks([])
+        ax4.set_yticklabels(labels=[], visible=False)
+        ax4.set_ylabel('', visible=False)
+        ax4.set_yticks([])
+        data = df_summary[(df_summary.group=='group1') & (df_summary.ses=='ses-pre')]
+        x,y,mu = get_kde(data, var=var, args=args)
+        ax4.fill(-y,x, color=group_colors['group1'], alpha=0.5)
+        ax4.plot([-mu,0],[data[var].mean(), data[var].mean()], '-', color=group_colors['group1'])
+
+        ax5 = fig.add_subplot(gs[0,9])
+        ax5.set_ylim(pointplot_ylim[args.seed_type][var])
+        ax5.spines['top'].set_visible(False)
+        ax5.spines['right'].set_visible(False)
+        ax5.spines['bottom'].set_visible(False)
+        ax5.spines['left'].set_visible(False)
+        ax5.set_xticklabels(labels=[], visible=False)
+        ax5.set_xlabel('', visible=False)
+        ax5.set_xticks([])
+        ax5.set_yticklabels(labels=[], visible=False)
+        ax5.set_ylabel('', visible=False)
+        ax5.set_yticks([])
+        data = df_summary[(df_summary.group=='group1') & (df_summary.ses=='ses-post')]
+        x,y,mu = get_kde(data, var=var, args=args)
+        ax5.fill(y,x, color=group_colors['group1'], alpha=0.5)
+        ax5.plot([0,mu],[data[var].mean(), data[var].mean()], '-', color=group_colors['group1'])
+
+        """
+        for i,group in enumerate(['group2', 'group1']):
+            if group=='group1':
+                plt.sca(ax4)
+                ax = plt.gca()
+            else:
+                plt.sca(ax3)
+                ax = plt.gca()
+            sbn.violinplot(data=df_summary[df_summary.group==group], x='group', y=var, hue='ses', dodge=True, split=True, palette={'ses-pre':group_colors[group], 'ses-post':group_colors[group]}, linewidth=1, inner='quartile', scale='width')
             plt.setp(ax.collections, alpha=.5)
             plt.legend().set_visible(False)
-            #plt.legend(bbox_to_anchor=(1.05, 0.8), loc='upper right', borderaxespad=0)
-
-        ax1 = plt.subplot(1,2,1)
-        ax1.set_ylim(pointplot_ylim[args.seed_type][var])
-        ax1.spines['top'].set_visible(False)
-        ax1.spines['right'].set_visible(False)
-        ax1.set_title('Active')
-
-        ax2 = plt.subplot(1,2,2)
-        ax2.set_ylim(pointplot_ylim[args.seed_type][var])
-        ax2.spines['top'].set_visible(False)
-        ax2.spines['right'].set_visible(False)
-        ax2.spines['left'].set_visible(False)
-        ax2.set_yticklabels(labels=[], visible=False)
-        ax2.set_ylabel('', visible=False)
-        ax2.set_yticks([])
-        ax2.set_title('Sham')
+        """
         plt.tight_layout()
 
+
         if args.save_figs:
-            fname = '_'.join(['violin_plot',var,'indStim',datetime.now().strftime('%d%m%Y.pdf')])
+            fname = '_'.join(['point_plot_distrib',args.metrics[0],var,'indStim',datetime.now().strftime('%d%m%Y.pdf')])
             plt.savefig(os.path.join(proj_dir, 'img', fname))
 
         if args.plot_figs:
             plt.show(block=False)
         else:
             plt.close(fig)
+
 
 
 def print_stats(df_summary, args):
@@ -1426,7 +1506,7 @@ if __name__=='__main__':
     atlases = [args.atlas]
     #metrics = ['detrend_filtered', 'detrend_gsr_filtered']
     pre_metric = 'seed_not_smoothed' #'unscrubbed_seed_not_smoothed'
-    metrics = ['detrend_filtered_scrubFD05'] #'detrend_gsr_smooth-6mm', 'detrend_gsr_filtered_scrubFD06'
+    metrics = ['detrend_gsr_filtered_scrubFD05'] #'detrend_gsr_smooth-6mm', 'detrend_gsr_filtered_scrubFD06'
     seses = ['ses-pre', 'ses-post']
 
     args.atlases = atlases
@@ -1494,14 +1574,14 @@ if __name__=='__main__':
         plot_voi_corr(df_voi_corr, seeds=subrois, args=args)
 
         if args.save_outputs:
-            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+            save_suffix = '_'.join([args.metrics[0],args.seed_type,args.fwhm])
             if args.unilateral_seed:
                 save_suffix += '_unilateral'
             else:
                 save_suffix += '_bilateral'
             if not args.use_group_avg_stim_site:
                 save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr'+save_suffix+'.pkl'), 'wb') as f:
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr_'+save_suffix+'.pkl'), 'wb') as f:
                 pickle.dump(df_voi_corr,f)
 
     if args.non_parametric_analysis:
@@ -1533,7 +1613,7 @@ if __name__=='__main__':
             plot_ALFF(df_summary, args)
 
         if args.save_outputs:
-            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+            save_suffix = '_'.join([args.metrics[0],args.seed_type,args.fwhm])
             if not args.use_group_avg_stim_site:
                 save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
             with open(os.path.join(proj_dir, 'postprocessing', 'df_alff'+save_suffix+'.pkl'), 'wb') as f:
