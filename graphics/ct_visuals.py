@@ -56,8 +56,8 @@ imgs_info = {   'base': {       'path': os.path.join(proj_dir, 'utils', 'empty.n
                                 'name': 'base',
                                 'cmap': 'binary',
                                 'clim': [0, 1.],
-                                'opacity': 1.,
-                                'nan_opacity': 1. },
+                                'opacity': 0.5,
+                                'nan_opacity': 0.5 },
                 'stim_5mm': {   'path': os.path.join(proj_dir, 'utils', 'stim_VOI_5mm.nii.gz'),
                                 'name':'stim_5mm',
                                 'cmap':'Reds',
@@ -101,6 +101,8 @@ group_colors = {'group1': 'orange', 'group2':'lightslategray'}
 pointplot_ylim = {  'Harrison2009': {'corr': [-1,1], 'fALFF':[0.0,0.03]},
                     'TianS4': {'corr': [-0.01,0.01], 'fALFF':[0.0,0.03]},
                 }
+
+tail_colors = {'left':'firebrick', 'right':'dodgerblue'}
 
 # Additionally, all the modules other than ipygany and pythreejs require a framebuffer, which can be setup on a headless environment with pyvista.start_xvfb().
 pv.start_xvfb()
@@ -172,7 +174,7 @@ def project_surface(template, img, name):
     template.both.point_data[name] = img.both
 
 
-def plot_surface(surfs, stim_spheres, names=imgs_info.keys(), args=None):
+def plot_surface(surfs, stim_spheres, roi_spheres, names=imgs_info.keys(), args=None):
     """  """
     cam_pos = {'front':[-3, 2, -1], 'medial':[1,1,-0.3]}
 
@@ -200,11 +202,17 @@ def plot_surface(surfs, stim_spheres, names=imgs_info.keys(), args=None):
         img_info = imgs_info[img_name]
         pl.add_mesh(surfs.right.copy(), scalars=img_name, cmap=img_info['cmap'], smooth_shading=True, opacity=img_info['opacity'], clim=img_info['clim'],
                     nan_color='white', nan_opacity=img_info['nan_opacity'], interpolate_before_map=False, show_scalar_bar=True)
+        pl.add_mesh(surfs.left.copy(), scalars=img_name, cmap=img_info['cmap'], smooth_shading=True, opacity=img_info['opacity'], clim=img_info['clim'],
+                    nan_color='white', nan_opacity=img_info['nan_opacity'], interpolate_before_map=False, show_scalar_bar=True)
     pl.camera_position = cam_pos['front']
     pl.background_color = 'white'
 
     if args.show_stim_balls:
         for s in stim_spheres:
+            pl.add_mesh(s['sphere'], color=s['color'])
+
+    if args.show_roi_degree:
+        for s in roi_spheres:
             pl.add_mesh(s['sphere'], color=s['color'])
 
     """pl.subplot(0,3)
@@ -232,6 +240,19 @@ def get_stim_spheres(args):
             stim_spheres.append( {'subj':stim['subjs'], 'group':grp, 'sphere':s, 'color':group_colors[grp]} )
     return stim_spheres
 
+def get_roi_spheres(args):
+    """ create spheres of radius equal to the degree of the node connectivity """
+    with open(os.path.join(proj_dir, 'postprocessing', 'df_atlas.pkl'), 'rb') as f:
+        df_atlas = pickle.load(f)
+    roi_spheres = []
+    for i,row in df_atlas.iterrows():
+        #x,y,z = row['centroid']
+        for tail in tail_colors.keys():
+            degree = row['degree_'+tail]
+            s = pv.Sphere(center=np.array(row['centroid'], dtype=float), radius=degree/3)
+            roi_spheres.append({'sphere':s, 'color':tail_colors[tail]})
+    return roi_spheres
+
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
@@ -244,9 +265,10 @@ if __name__=='__main__':
     parser.add_argument('--stim_balls_scaling', type=float, default=1., action='store', help='scaling of coordinates of small balls at stim location to be closer to surface mesh')
     parser.add_argument('--plot_surface', default=False, action='store_true', help='plot surface mesh with stim  locations and mask')
     parser.add_argument('--smoothed_surface', default=False, action='store_true', help='use smooth cortical mesh')
+    parser.add_argument('--show_roi_degree', default=False, action='store_true', help='display spheres of degree radius at roi centroids ')
     args = parser.parse_args()
 
-    names = ['base', 'tian_acc' ]
+    names = ['base']
 
     if args.plot_surface:
         # get template ICBM surfaces (left, right and both hemispheres meshes)
@@ -265,4 +287,6 @@ if __name__=='__main__':
         # get small balls located at stim sites
         stim_spheres = get_stim_spheres(args)
 
-        plot_surface(surfs, stim_spheres, names=names, args=args)
+        roi_spheres = get_roi_spheres(args)
+
+        plot_surface(surfs, stim_spheres, roi_spheres, names=names, args=args)
