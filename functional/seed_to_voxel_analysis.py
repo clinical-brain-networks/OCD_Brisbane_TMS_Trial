@@ -392,9 +392,10 @@ def get_subjs_after_scrubbing(subjs, seses, metrics, min_time=5):
         if os.path.exists(fpath):
             with open(fpath, 'r') as f:
                 f_proc = json.load(f)
-                if f_proc[scrub_key] < scrub_thr:
-                    print("{} has less than {:.2f} min of data left after scrubbing, removing it..".format(subj, f_proc[scrub_key]))
-                    revoked.append(subj)
+                if f_proc['scrubbing']:
+                    if f_proc[scrub_key] < scrub_thr:
+                        print("{} has less than {:.2f} min of data left after scrubbing, removing it..".format(subj, f_proc[scrub_key]))
+                        revoked.append(subj)
         else:
             print("{} preprocessing not found, removing it..".format(subj))
             revoked.append(subj)
@@ -1134,10 +1135,10 @@ def plot_within_group_masks(subrois, glm_results, args):
 
 
 
-def compute_ALFF(subjs, args=None):
+def compute_ALFF(subj, args=None):
     """ compute Amplitude Low Frequency Fluctuation (ALFF) and fractional ALFF (fALFF) """
     dfs = []
-    for subj,ses in itertools.product(subjs, args.seses):
+    for ses in args.seses:
         if 'gsr' in args.metrics[0]:
             fname = '_'.join([subj,ses])+'_task-rest_space-MNI152NLin2009cAsym_desc-detrend_gsr_smooth-6mm.nii.gz'
             bold_file = os.path.join(proj_dir, 'data/derivatives/post-fmriprep-fix/', subj, ses, 'func', fname)
@@ -1146,13 +1147,18 @@ def compute_ALFF(subjs, args=None):
             bold_file = os.path.join(proj_dir, 'data/derivatives/fmriprep-fix/', subj, ses, 'func', fname)
 
         stim_mask,stim_masker = get_subj_stim_mask(subj, args)
-        if ( (stim_masker == None) or not(os.path.exists(bold_file)) ) :
+        if (stim_masker == None) :
+            print("{} {} stimulus mask error".format(subj, ses))
+            continue
+        elif not(os.path.exists(bold_file)) :
+            print(bold_file+" does not exists!")
             continue
         ts = stim_masker.fit()
         ts = stim_masker.transform_single_imgs(bold_file)
         #stim_mask = resample_to_img(stim_mask, bold_file, interpolation='nearest')
         #ts = nilearn.masking.apply_mask(bold_file, stim_mask, smoothing_fwhm=args.brain_smoothing_fwhm)
-        freqs, Pxx = scipy.signal.welch(ts.squeeze(), fs=1./0.81, scaling='spectrum', nperseg=128, noverlap=64)
+
+        freqs, Pxx = scipy.signal.welch(ts.squeeze(), fs=1./0.81, scaling='spectrum', nperseg=64, noverlap=32)
         #freqs, Pxx = scipy.signal.periodogram(ts.squeeze().astype(float), fs=1./0.81, scaling='spectrum', detrend=False, window='hann')
         #Pxx, freqs = plt.psd(ts.squeeze(), Fs=1./0.81);
         #Pxx = np.sqrt(Pxx)
@@ -1165,8 +1171,8 @@ def compute_ALFF(subjs, args=None):
         dfs.append({'subj':subj, 'ses':ses, 'ALFF':ALFF, 'fALFF':fALFF}) #'stim_loc':np.array([l['x'], l['y'], l['z']]).flatten(),
         if args.verbose:
             print(subj + ' ' + ses + ' ALFF done.')
-    df_alff = pd.DataFrame(dfs)
-    return df_alff
+    return dfs
+
 
 def plot_ALFF(df_summary, args):
     """ plot Amplitude Low Freq Fluctuations (ALFF) and Fractional ALFF """
@@ -1203,6 +1209,9 @@ def compute_nbs(subjs, args):
     g2=[]
     for subj in subjs:
         group = get_group(subj)
+        if group=='none':
+            print(subj +' not in any group, discard.')
+            continue
         fname = subj+'_ses-pre_task-rest_atlas-Schaefer2018_400_17+Tian_S4_desc-corr-detrend_filtered_scrub_gsr.h5'
         fpath = os.path.join('/home/sebastin/working/lab_lucac/shared/projects/ocd_clinical_trial/data/derivatives/post-fmriprep-fix/'+subj+'/ses-pre/fc', fname)
         if os.path.exists(fpath):
@@ -1219,15 +1228,17 @@ def compute_nbs(subjs, args):
         else:
             print(subj +' file not found, discard.')
             continue
-        if group=='group1':
-            g1.append(pre-post)
-        elif group=='group2':
-            g2.append(pre-post)
-        else:
-            print(subj +' not in any group, discard.')
-            continue
-    pval, adj, null = bct.nbs_bct(np.array(g1).T, np.array(g2).T, thresh=3.5)
-    return pval, adj, null
+
+        if args.nbs_session:
+            g1.append(pre)
+            g2.append(post)
+        else:   #interaction
+            if group=='group1':
+                g1.append(pre-post)
+            elif group=='group2':
+                g2.append(pre-post)
+    pvals, adj, null = bct.nbs_bct(np.array(g1).T, np.array(g2).T, thresh=args.nbs_thresh, paired=args.nbs_paired, k=args.n_perm, tail=args.nbs_tail)
+    return pvals, adj, null
 
 
 def get_kde(data, var, smoothing_factor=20, args=None):
@@ -1275,10 +1286,13 @@ def plot_pointplot(df_summary, args):
         ax2.set_yticks([])
 
         for subj in df_summary.subj.unique():
-            if str(df_summary[df_summary['subj']==subj].group.unique().squeeze()) == 'group1':
+            grp = str(df_summary[df_summary['subj']==subj].group.unique().squeeze())
+            if grp == 'group1':
                 plt.sca(ax2)
-            else:
+            elif grp == 'group2':
                 plt.sca(ax1)
+            else:
+                continue
             sbn.pointplot(data=df_summary[df_summary['subj']==subj], x='ses', y=var, dodge=(np.random.rand()-0.5), color=group_colors[get_group(subj)], linewidth=0.5, alpha=0.5)
 
         plt.setp(ax1.lines, linewidth=0.75)
@@ -1315,6 +1329,7 @@ def plot_pointplot(df_summary, args):
         ax0.set_xlabel('', visible=False)
         ax0.set_xticks([])
         data = df_summary[(df_summary.group=='group2') & (df_summary.ses=='ses-pre')]
+        data = data[~data[var].isna()]
         x,y,mu = get_kde(data, var=var, args=args)
         ax0.fill(-y,x, color=group_colors['group2'], alpha=0.5)
         ax0.plot([-mu,0],[data[var].mean(), data[var].mean()], '-', color=group_colors['group2'])
@@ -1332,6 +1347,7 @@ def plot_pointplot(df_summary, args):
         ax3.set_ylabel('', visible=False)
         ax3.set_yticks([])
         data = df_summary[(df_summary.group=='group2') & (df_summary.ses=='ses-post')]
+        data = data[~data[var].isna()]
         x,y,mu = get_kde(data, var=var, args=args)
         ax3.fill(y,x, color=group_colors['group2'], alpha=0.5)
         ax3.plot([0,mu],[data[var].mean(), data[var].mean()], '-', color=group_colors['group2'])
@@ -1349,6 +1365,7 @@ def plot_pointplot(df_summary, args):
         ax4.set_ylabel('', visible=False)
         ax4.set_yticks([])
         data = df_summary[(df_summary.group=='group1') & (df_summary.ses=='ses-pre')]
+        data = data[~data[var].isna()]
         x,y,mu = get_kde(data, var=var, args=args)
         ax4.fill(-y,x, color=group_colors['group1'], alpha=0.5)
         ax4.plot([-mu,0],[data[var].mean(), data[var].mean()], '-', color=group_colors['group1'])
@@ -1366,6 +1383,7 @@ def plot_pointplot(df_summary, args):
         ax5.set_ylabel('', visible=False)
         ax5.set_yticks([])
         data = df_summary[(df_summary.group=='group1') & (df_summary.ses=='ses-post')]
+        data = data[~data[var].isna()]
         x,y,mu = get_kde(data, var=var, args=args)
         ax5.fill(y,x, color=group_colors['group1'], alpha=0.5)
         ax5.plot([0,mu],[data[var].mean(), data[var].mean()], '-', color=group_colors['group1'])
@@ -1398,46 +1416,56 @@ def plot_pointplot(df_summary, args):
 
 def print_stats(df_summary, args):
     """ print stats of pre vs post variables """
-    df_summary.dropna(inplace=True)
+    #df_summary.dropna(inplace=True)
     for var in ['corr', 'fALFF']:
+        df = df_summary[~df_summary[var].isna()]
+        df_pre = df[(df['ses']=='ses-pre')]
+        df_post = df[(df['ses']=='ses-post')]
 
-        df_pre = df_summary[(df_summary['ses']=='ses-pre')]
-        df_post = df_summary[(df_summary['ses']=='ses-post')]
-        diff_corr = np.array(df_pre['corr']) - np.array(df_post['corr'])
-        diff_fALFF = np.array(df_pre['fALFF']) - np.array(df_post['fALFF'])
+        diff_var = np.array(df_pre[var]) - np.array(df_post[var])
         diff_ybocs = np.array(df_pre['YBOCS_Total']) - np.array(df_post['YBOCS_Total'])
 
-        r,p = scipy.stats.pearsonr(diff_corr, diff_ybocs)
-        print('Delta FC-YBOCS correlation across groups: r={:.2f}, p={:.3f}'.format(r,p))
+        r,p = scipy.stats.pearsonr(diff_var, diff_ybocs)
+        print('Delta {}-YBOCS correlation across groups: r={:.2f}, p={:.3f}'.format(var,r,p))
 
-        r,p = scipy.stats.pearsonr(diff_fALFF, diff_ybocs)
-        print('Delta fALFF-YBOCS correlation in across groups: r={:.2f}, p={:.3f}'.format(r,p))
+        t,p = scipy.stats.ttest_ind(df_pre['YBOCS_Total'], df_post['YBOCS_Total'])
+        print('YBOCS pre-post stats across groups: t={:.2f}, p={:.3f}'.format(t,p))
 
-        for group in df_summary.group.unique():
-            t,p = scipy.stats.ttest_ind(np.array(df_summary[(df_summary['ses']=='ses-pre') & (df_summary['group']==group)][var]), np.array(df_summary[(df_summary['ses']=='ses-post') & (df_summary['group']==group)][var]) )
+        for group in df.group.unique():
+            t,p = scipy.stats.ttest_ind(np.array(df[(df['ses']=='ses-pre') & (df['group']==group)][var]), np.array(df[(df['ses']=='ses-post') & (df['group']==group)][var]) )
             print('{} pre-post {}  t={:.2f}  p={:.3f}'.format(var, group, t, p))
 
-            df_pre = df_summary[(df_summary['ses']=='ses-pre') & (df_summary['group']==group)]
-            df_post = df_summary[(df_summary['ses']=='ses-post') & (df_summary['group']==group)]
-            diff_corr = np.array(df_pre['corr']) - np.array(df_post['corr'])
-            diff_fALFF = np.array(df_pre['fALFF']) - np.array(df_post['fALFF'])
+            df_pre = df[(df['ses']=='ses-pre') & (df['group']==group)]
+            df_post = df[(df['ses']=='ses-post') & (df['group']==group)]
+
+            diff_var = np.array(df_pre[var]) - np.array(df_post[var])
             diff_ybocs = np.array(df_pre['YBOCS_Total']) - np.array(df_post['YBOCS_Total'])
 
-            r,p = scipy.stats.pearsonr(diff_corr, diff_ybocs)
-            print('Delta FC-YBOCS correlation in {}: r={:.2f}, p={:.3f}'.format(group,r,p))
-
-            r,p = scipy.stats.pearsonr(diff_fALFF, diff_ybocs)
-            print('Delta fALFF-YBOCS correlation in {}: r={:.2f}, p={:.3f}'.format(group,r,p))
+            r,p = scipy.stats.pearsonr(diff_var, diff_ybocs)
+            print('Delta {}-YBOCS correlation in {}: r={:.2f}, p={:.3f}'.format(var,group,r,p))
 
             t,p = scipy.stats.ttest_ind(df_pre['YBOCS_Total'], df_post['YBOCS_Total'])
             print('YBOCS pre-post stats in {}: t={:.2f}, p={:.3f}'.format(group,t,p))
 
         print(var)
-        mixed = pg.mixed_anova(data=df_summary[df_summary.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
+
+        diff_g1 = np.array(df[(df.ses=='ses-pre') & (df.group=='group1')][var]) - np.array(df[(df.ses=='ses-post') & (df.group=='group1')][var])
+        diff_g2 = np.array(df[(df.ses=='ses-pre') & (df.group=='group2')][var]) - np.array(df[(df.ses=='ses-post') & (df.group=='group2')][var])
+        print(pg.ttest(diff_g1, diff_g2, correction=False))
+
+        mixed = pg.mixed_anova(data=df[df.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
         pg.print_table(mixed)
 
-        posthocs = pg.pairwise_ttests(data=df_summary[df_summary.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
+        posthocs = pg.pairwise_ttests(data=df[df.ses!='pre-post'], dv=var, within='ses', between='group', subject='subj')
         pg.print_table(posthocs)
+
+
+
+
+
+def sanity_check(args):
+    """ show subjects that got discarded from the analysis and why """
+
 
 
 if __name__=='__main__':
@@ -1494,19 +1522,24 @@ if __name__=='__main__':
     parser.add_argument('--unilateral_seed', default=False, action='store_true', help="compute FC stats using only seed from one side (must be specified in header seed_loc)")
     parser.add_argument('--plot_pointplot', default=False, action='store_true', help="plot VOI correlation and fALFF pointplot (pre vs post)")
     parser.add_argument('--print_stats', default=False, action='store_true', help="print mixed ANOVA stats (group by session) and other stats (deltas YBOCS, FC, etc)")
+    parser.add_argument('--nbs_session', default=False, action='store_true', help="perform NBS on session difference rather than the default interaction")
+    parser.add_argument('--nbs_thresh', type=float, default=3.5, action='store', help="NBS stat threshold")
+    parser.add_argument('--nbs_paired', default=False, action='store_true', help="NBS paired t-test")
+    parser.add_argument('--nbs_tail', type=str, default='both', action='store', help="NBS t-test tail (both, right or left); default=both")
     args = parser.parse_args()
 
     if args.subj!=None:
         subjs = pd.Series([args.subj])
     else:
         subjs = pd.read_table(os.path.join(proj_dir, 'code', 'patients_list.txt'), names=['name'])['name']
+    #subjs = pd.Series(['sub-patient04', 'sub-patient54'])
 
     # options
     #atlases= ['Harrison2009'] #['schaefer100_tianS1', 'schaefer200_tianS2', 'schaefer400_tianS4'] #schaefer400_harrison2009
     atlases = [args.atlas]
     #metrics = ['detrend_filtered', 'detrend_gsr_filtered']
     pre_metric = 'seed_not_smoothed' #'unscrubbed_seed_not_smoothed'
-    metrics = ['detrend_gsr_filtered_scrubFD05'] #'detrend_gsr_smooth-6mm', 'detrend_gsr_filtered_scrubFD06'
+    metrics =  ['detrend_gsr_filtered_scrubFD05'] #'detrend_gsr_smooth-6mm', 'detrend_gsr_filtered_scrubFD06'
     seses = ['ses-pre', 'ses-post']
 
     args.atlases = atlases
@@ -1607,7 +1640,12 @@ if __name__=='__main__':
             plot_within_mask_corr(df_mask_corr, args=args)
 
     if args.compute_ALFF:
-        df_alff = compute_ALFF(subjs, args)
+        if len(subjs) > 1:
+            df_lines = Parallel(n_jobs=args.n_jobs, verbose=1)(delayed(compute_ALFF)(subj,args) for subj in subjs)
+            df_lines = itertools.chain(*df_lines)
+        else:
+            df_lines = compute_ALFF(subjs[0], args)
+        df_alff = pd.DataFrame(df_lines)
         df_summary = pd.merge(df_alff, df_groups)
         if args.plot_figs:
             plot_ALFF(df_summary, args)
@@ -1616,11 +1654,26 @@ if __name__=='__main__':
             save_suffix = '_'.join([args.metrics[0],args.seed_type,args.fwhm])
             if not args.use_group_avg_stim_site:
                 save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
+            today = datetime.now().strftime("%Y%m%d")
+            save_suffix += '_'+today
             with open(os.path.join(proj_dir, 'postprocessing', 'df_alff'+save_suffix+'.pkl'), 'wb') as f:
                 pickle.dump(df_summary,f)
 
     if args.compute_nbs:
-        df_nbs = compute_nbs(subjs, args)
+        out_nbs = compute_nbs(subjs, args)
+        if args.save_outputs:
+            save_suffix = '_10thr{}'.format(int(args.nbs_thresh*10))
+            if args.nbs_session:
+                save_suffix += '_session'
+            else:
+                save_suffix += '_interaction'
+            if args.nbs_paired:
+                save_suffix += '_paired'
+            save_suffix += '_{}_tail_{}perms'.format(args.nbs_tail, args.n_perm)
+            today = datetime.now().strftime("%Y%m%d")
+            save_suffix += '_'+today
+            with open(os.path.join(proj_dir, 'postprocessing', 'nbs'+save_suffix+'.pkl'), 'wb') as f:
+                pickle.dump(out_nbs,f)
 
     if args.plot_pointplot:
         # loadings
