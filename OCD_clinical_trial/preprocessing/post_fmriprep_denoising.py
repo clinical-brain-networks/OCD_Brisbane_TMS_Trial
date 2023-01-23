@@ -66,11 +66,11 @@ for ses in ['ses-pre', 'ses-post']:
 
     # list the models I would like to run:
 
-    pipelines = {'detrend_gsr_filtered_scrubFD05': { 'niipath': rest_nii,
+    pipelines = {'detrend_filtered_scrubFD05': { 'niipath': rest_nii,
                                                   'maskpath': rest_msk,
                                                   'tsvpath': rest_tsv,
                                                   'add_orig_mean_img': True,
-                                                  'confound_list': ['global_signal'],
+                                                  'confound_list': [],
                                                   'detrend': True,
                                                   'fmw_disp_th': 0.5,
                                                   'fwhm': 0,
@@ -80,8 +80,8 @@ for ses in ['ses-pre', 'ses-post']:
                                                   'remove_volumes': True,
                                                   'tr': 0.81,
                                                   'num_confounds': 1,
-                                                  'task': 'rest'},
-                'detrend_gsr_smooth-6mm': { 'niipath': rest_nii,
+                                                  'task': 'rest'}}
+    """ 'detrend_gsr_smooth-6mm': { 'niipath': rest_nii,
                                                   'maskpath': rest_msk,
                                                   'tsvpath': rest_tsv,
                                                   'add_orig_mean_img': True,
@@ -96,7 +96,7 @@ for ses in ['ses-pre', 'ses-post']:
                                                   'tr': 0.81,
                                                   'num_confounds': 1,
                                                   'task': 'rest'}}
-
+    """
 
     for pl_label in pipelines:
         print('Running: '+pl_label)

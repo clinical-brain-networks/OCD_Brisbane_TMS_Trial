@@ -45,9 +45,7 @@ deriv_dir = os.path.join(proj_dir, 'data/derivatives')
 atlas_dir = os.path.join(proj_dir, 'utils')
 fs_dir = '/usr/local/freesurfer/'
 
-sys.path.insert(0, os.path.join(code_dir, 'functional'))
-import seed_to_voxel_analysis
-from seed_to_voxel_analysis import get_group, stim_coords
+from OCD_clinical_trial.functional.seed_to_voxel_analysis import get_group, stim_coords
 
 # uncomment in case of using freesurfer surfaces
 #coords, faces, info, stamp = nib.freesurfer.io.read_geometry(os.path.join(fs_dir, 'subjects', 'fsaverage4', 'surf', 'lh.white'), read_metadata=True, read_stamp=True)

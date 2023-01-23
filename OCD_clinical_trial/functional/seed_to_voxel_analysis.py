@@ -50,6 +50,12 @@ import platform
 import warnings
 warnings.filterwarnings('once')
 
+# special imports
+from OCD_baseline.old import qsiprep_analysis
+from OCD_baseline.utils import atlaser
+from OCD_baseline.structural.voxelwise_diffusion_analysis import cohen_d
+
+
 # get computer name to set paths
 if platform.node()=='qimr18844':
     working_dir = '/home/sebastin/working/'
@@ -68,24 +74,6 @@ baseline_dir = working_dir+'lab_lucac/sebastiN/projects/OCDbaseline'
 code_dir = os.path.join(baseline_dir, 'docs/code')
 atlas_dir = os.path.join(baseline_dir, 'utils')
 
-lukeH_proj_dir = working_dir+'lab_lucac/lukeH/projects/OCDbaseline'
-lukeH_deriv_dir = os.path.join(lukeH_proj_dir, 'data/derivatives')
-
-
-# This section should be replaced with propper packaging one day
-sys.path.insert(0, os.path.join(code_dir, 'old'))
-sys.path.insert(0, os.path.join(code_dir, 'utils'))
-sys.path.insert(0, os.path.join(code_dir, 'structural'))
-import qsiprep_analysis
-import atlaser
-from voxelwise_diffusion_analysis import cohen_d
-
-# there you go:
-#from ..old import qsiprep_analysis
-#from ..utils import atlaser
-#from ..structural.voxelwise_diffusion_analysis import cohen_d
-
-from atlaser import Atlaser
 
 atlas_cfg_path = os.path.join(atlas_dir, 'atlas_config.json')
 with open(atlas_cfg_path) as jsf:
@@ -209,7 +197,7 @@ def create_design_matrix(subjs, args):
 
 
 def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
-    """ perform seed-to-voxel analysis of bold data """
+    """ perform seed-to-voxel analysis of bold data based on atlas parcellation """
     # prepare output directory
     out_dir = os.path.join(proj_dir, 'postprocessing', subj)
     if not os.path.exists(out_dir):
@@ -237,7 +225,7 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
             #hf = h5py.File(os.path.join(deriv_dir, 'post-fmriprep-fix', subj, 'timeseries', hfname), 'w')
 
             # get atlas utility
-            atlazer = Atlaser(atlas)
+            atlazer = atlaser.Atlaser(atlas)
 
             # extract seed timeseries and perform seed-to-voxel correlation
             for seed in seeds:
@@ -256,7 +244,7 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
 
 # TODO: could refactor this function, only a few lines changed from the one above
 def sphere_seed_to_voxel(subj, ses, seeds, metrics, atlases=['Harrison2009'], args=None):
-    """ perform seed-to-voxel analysis of bold data using Harrison2009 3.5mm sphere seeds"""
+    """ perform seed-to-voxel analysis of bold data using Harrison2009 3.5mm sphere seeds """
     # prepare output directory
     out_dir = os.path.join(proj_dir, 'postprocessing', subj)
     if not os.path.exists(out_dir):
@@ -267,8 +255,6 @@ def sphere_seed_to_voxel(subj, ses, seeds, metrics, atlases=['Harrison2009'], ar
     for atlas,metric in itertools.product(atlases,metrics):
         # get bold time series for each voxel
         img_space = 'MNI152NLin2009cAsym'
-        #bold_file = os.path.join(lukeH_deriv_dir, 'post-fmriprep-fix', subj,'func', \
-        #                       subj+'_task-rest_space-'+img_space+'_desc-'+metric+'_scrub.nii.gz')
         bold_file = os.path.join(deriv_dir, 'post-fmriprep-fix', subj, ses, 'func', \
                                  subj+'_'+ses+'_task-rest_space-'+img_space+'_desc-'+metric+'.nii.gz')
         if os.path.exists(bold_file):
@@ -383,7 +369,7 @@ def get_subjs_after_scrubbing(subjs, seses, metrics, min_time=5):
     scrub_key = 'scrubbed_length_min'
     scrub_thr = min_time
     proc_dir = 'post-fmriprep-fix'
-    d_dir = deriv_dir #lukeH_deriv_dir
+    d_dir = deriv_dir 
 
     revoked = []
     for subj,ses,metric in itertools.product(subjs,seses,metrics):
@@ -687,7 +673,7 @@ def compute_voi_corr(subjs, seeds = ['Acc', 'dPut', 'vPut'], args=None):
                     df_line = {'subj':subj, 'ses':ses, 'metric':metric, 'atlas':atlas, 'fwhm':fwhm, 'group':group, 'pathway':'_'.join([seed,'to','stim']), 'corr':avg_corr}
                     dfs.append(df_line)
 
-                    # quick and dirty way to add pre - post difference
+                    # simple way to add pre - post difference to compute interaction
                     #----------------------- < from here
                     if ses=='ses-pre':
                         pre = avg_corr
@@ -1463,10 +1449,6 @@ def print_stats(df_summary, args):
 
 
 
-def sanity_check(args):
-    """ show subjects that got discarded from the analysis and why """
-
-
 
 if __name__=='__main__':
 
@@ -1494,7 +1476,6 @@ if __name__=='__main__':
     parser.add_argument('--cluster_thresh', type=float, default=4., action='store', help="T stat to threshold to create clusters from voxel stats")
     parser.add_argument('--use_TFCE', default=False, action='store_true', help="use Threshold-Free Cluster Enhancement with randomise ")
     parser.add_argument('--OCD_minus_HC', default=False, action='store_true', help='direction of the t-test in FSL randomise -- default uses F-test')
-    parser.add_argument('--HC_minus_OCD', default=False, action='store_true', help='direction of the t-test in FSL randomise -- default uses F-test')
     parser.add_argument('--create_sphere_within_cluster', default=False, action='store_true', help='export sphere around peak within VOI cluster in prep for DCM analysis')
     parser.add_argument('--brain_smoothing_fwhm', default=8., type=none_or_float, action='store', help='brain smoothing FWHM (default 8mm as in Harrison 2009)')
     parser.add_argument('--fdr_threshold', type=float, default=0.05, action='store', help="cluster level threshold, FDR corrected")
@@ -1537,7 +1518,6 @@ if __name__=='__main__':
     # options
     #atlases= ['Harrison2009'] #['schaefer100_tianS1', 'schaefer200_tianS2', 'schaefer400_tianS4'] #schaefer400_harrison2009
     atlases = [args.atlas]
-    #metrics = ['detrend_filtered', 'detrend_gsr_filtered']
     pre_metric = 'seed_not_smoothed' #'unscrubbed_seed_not_smoothed'
     metrics =  ['detrend_gsr_filtered_scrubFD05'] #'detrend_gsr_smooth-6mm', 'detrend_gsr_filtered_scrubFD06'
     seses = ['ses-pre', 'ses-post']
@@ -1547,7 +1527,6 @@ if __name__=='__main__':
     args.metrics = metrics
     args.seses = seses
     args.fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-    #TODO: in_dir must be tailored to the atlas. ATM everything is put in Harrison2009 folder
     args.in_dir = os.path.join(proj_dir, 'postprocessing/SPM/input_imgs/', args.seed_type, pre_metric)
     os.makedirs(args.in_dir, exist_ok=True)
 
