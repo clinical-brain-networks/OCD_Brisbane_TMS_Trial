@@ -66,11 +66,11 @@ The output should look like this _(extact values may differ according to paramet
 ![FC_fALFF_outputs](screenshots/screenshot_FC_fALFF.jpg)
 
 ## Network-based Statistics (NBS)
-To run the network-based statistics analysis between sessions (i.e. before vs. after TMS), using a threshold of 3.5 and 5000 permutations:
+To run the network-based statistics analysis for the main effect between sessions (i.e. paired t-test on FC pre vs. post TMS, collapsing groups), using a threshold of 3.5 and 5000 permutations:
 
     python functional/seed_to_voxel_analysis.py --compute_nbs --nbs_session --nbs_paired --nbs_thresh 3.5 --n_perm 5000
 
-To run the NBS analysis on the interaction:
+To run the NBS analysis on the interaction (i.e. t-test on group difference, collapsing session as "pre minus post" TMS):
 
     python functional/seed_to_voxel_analysis.py --compute_nbs --nbs_thresh 3.5 --n_perm 5000
 
