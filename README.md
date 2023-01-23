@@ -70,7 +70,7 @@ To run the network-based statistics analysis for the main effect between session
 
     python functional/seed_to_voxel_analysis.py --compute_nbs --nbs_session --nbs_paired --nbs_thresh 3.5 --n_perm 5000
 
-To run the NBS analysis on the interaction (i.e. t-test on group difference, collapsing session as "pre minus post" TMS):
+To run the NBS analysis on the interaction (i.e. unpaired t-test on group difference, using "pre minus post TMS" within group contrast):
 
     python functional/seed_to_voxel_analysis.py --compute_nbs --nbs_thresh 3.5 --n_perm 5000
 
