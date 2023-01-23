@@ -33,7 +33,7 @@ Then from the root of the OCDbaseline source repository (where the `setup.py` is
 
 
 ## Usage
-This work is an extension of the OCD baseline analysis ([Naze et al. (2022)](https://academic.oup.com/brain/advance-article-abstract/doi/10.1093/brain/awac425/6830574)), now applied to the clinical trial data before and after Transmagnetic Brain Stimulation (TMS). 
+This work is an extension of the OCD baseline analysis ([Naze et al. (2022)](https://academic.oup.com/brain/advance-article-abstract/doi/10.1093/brain/awac425/6830574)), now applied to the clinical trial data before and after Transcranial Magnetic Stimulation (TMS). 
 
 The project is packaged in this repository and have dependencies from the baseline repo/package. 
 
