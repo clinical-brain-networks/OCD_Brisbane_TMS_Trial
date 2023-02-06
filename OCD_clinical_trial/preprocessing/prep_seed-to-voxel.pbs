@@ -33,9 +33,9 @@ subj=${subj_array[$IDX]}
 echo "Current subject: " ${subj}
 
 #echo 'Denoising '${subj}
-python ${proj_dir}code/preprocessing/post_fmriprep_denoising.py ${subj}
+python ${proj_dir}code/OCD_clinical_trial/preprocessing/post_fmriprep_denoising.py ${subj}
 
 
 echo 'Preparing '$subj' for seed-to-voxel analysis'
-python ${proj_dir}code/functional/seed_to_voxel_analysis.py --subj $subj --compute_seed_corr --n_jobs 1 --seed_type Harrison2009 --brain_smoothing_fwhm 6
+python ${proj_dir}code/OCD_clinical_trial/functional/seed_to_voxel_analysis.py --subj $subj --compute_seed_corr --merge_LR_hemis --n_jobs 1 --seed_type Harrison2009 --brain_smoothing_fwhm 8
 
