@@ -110,14 +110,14 @@ stim_coords_xls_fname = 'MNI_coordinates_FINAL.xlsx'
 stim_coords = pd.read_excel(os.path.join(proj_dir, 'data', stim_coords_xls_fname), usecols=['P ID', 'x', 'y', 'z'])
 stim_coords['subjs'] = stim_coords['P ID'].apply(lambda x : 'sub-patient'+x[-2:])
 
-seed_suffix = { 'Harrison2009': 'ns_sphere_seed_to_voxel',
+seed_suffix = { 'Harrison2009': 'sphere_seed_to_voxel',
                 'TianS4':'seed_to_voxel'}
 seed_ext =  { 'Harrison2009': '.nii.gz',
                 'TianS4':'.nii.gz'}
 
 group_colors = {'group1': 'orange', 'group2':'lightslategray'}
 
-pointplot_ylim = {  'Harrison2009': {'corr': [-1,1], 'fALFF':[1,2]},
+pointplot_ylim = {  'Harrison2009': {'corr': [-0.5,0.5], 'fALFF':[1,2]},
                     'TianS4': {'corr': [-0.01,0.01], 'fALFF':[1,2]},
                 }
 
@@ -216,7 +216,7 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
             print("{} {} bold file not found, skip".format(subj, ses))
             break
         brain_masker = NiftiMasker(smoothing_fwhm=args.brain_smoothing_fwhm, t_r=0.81, \
-            low_pass=0.1, high_pass=0.01, verbose=0)
+            low_pass=0.1, high_pass=0.01, verbose=0, standardize='zscore')
         voxels_ts = brain_masker.fit_transform(bold_img)
 
         for atlas in atlases:
@@ -231,9 +231,9 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
             for seed in seeds:
                 seed_img = atlazer.create_subatlas_img(seed)
                 seed_masker = NiftiLabelsMasker(seed_img, t_r=0.81, \
-                    low_pass=0.1, high_pass=0.01) #,standardize='zscore')
+                    low_pass=0.1, high_pass=0.01 ,standardize='zscore')
                 seed_ts = np.squeeze(seed_masker.fit_transform(bold_img))
-                seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)/seed_ts.shape[0]
+                seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)
                 seed_to_voxel_corr_img = brain_masker.inverse_transform(seed_to_voxel_corr.mean(axis=-1).T)
                 fname = '_'.join([subj,ses,metric,args.fwhm,atlas,seed,seed_suffix[args.seed_type],'corr.nii.gz'])
                 nib.save(seed_to_voxel_corr_img, os.path.join(out_dir, fname))
@@ -263,15 +263,15 @@ def sphere_seed_to_voxel(subj, ses, seeds, metrics, atlases=['Harrison2009'], ar
             print("{} {} bold file not found, skip".format(subj, ses))
             break
         brain_masker = NiftiMasker(smoothing_fwhm=args.brain_smoothing_fwhm, t_r=0.81, \
-            low_pass=0.1, high_pass=0.01, verbose=0)
+            low_pass=0.1, high_pass=0.01, verbose=0, standardize='zscore')
         voxels_ts = brain_masker.fit_transform(bold_img)
 
         # extract seed timeseries and perform seed-to-voxel correlation
         for seed in seeds:
             seed_masker = NiftiSpheresMasker([np.array(seed_loc[seed])], radius=3.5, t_r=0.81, \
-                                low_pass=0.1, high_pass=0.01, verbose=0)
+                                low_pass=0.1, high_pass=0.01, verbose=0, standardize='zscore')
             seed_ts = np.squeeze(seed_masker.fit_transform(bold_img))
-            seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)/seed_ts.shape[0]
+            seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)
             seed_to_voxel_corr_img = brain_masker.inverse_transform(seed_to_voxel_corr)
             fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
             fname = '_'.join([subj,ses,metric,fwhm,atlas,seed,seed_suffix[args.seed_type],'corr.nii.gz'])
@@ -1633,9 +1633,7 @@ if __name__=='__main__':
             save_suffix = '_'.join([args.metrics[0],args.seed_type,args.fwhm])
             if not args.use_group_avg_stim_site:
                 save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
-            today = datetime.now().strftime("%Y%m%d")
-            save_suffix += '_'+today
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff'+save_suffix+'.pkl'), 'wb') as f:
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff_'+save_suffix+'.pkl'), 'wb') as f:
                 pickle.dump(df_summary,f)
 
     if args.compute_nbs:
@@ -1656,21 +1654,21 @@ if __name__=='__main__':
 
     if args.plot_pointplot:
         # loadings
-        if 'df_alff' not in locals():
-            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+        if (('df_alff' not in locals()) & ('df_alff' not in globals())):
+            save_suffix = '_'.join([metrics[0],args.seed_type,args.fwhm])
             if not args.use_group_avg_stim_site:
                 save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff'+save_suffix+'.pkl'), 'rb') as f:
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff_'+save_suffix+'.pkl'), 'rb') as f:
                 df_alff = pickle.load(f)
-        if 'df_voi_corr' not in locals():
-            save_suffix = '_'+args.seed_type+'_'+args.fwhm
+        if (('df_voi_corr' not in locals()) & ('df_voi_corr' not in globals())):
+            save_suffix = '_'.join([metrics[0],args.seed_type,args.fwhm])
             if args.unilateral_seed:
                 save_suffix += '_unilateral'
             else:
                 save_suffix += '_bilateral'
             if not args.use_group_avg_stim_site:
                 save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr'+save_suffix+'.pkl'), 'rb') as f:
+            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr_'+save_suffix+'.pkl'), 'rb') as f:
                 df_voi_corr = pickle.load(f)
         with open(os.path.join(proj_dir, 'postprocessing', 'df_pat.pkl'), 'rb') as f:
             df_pat = pickle.load(f)
