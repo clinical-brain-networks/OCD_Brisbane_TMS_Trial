@@ -233,7 +233,7 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
                 seed_masker = NiftiLabelsMasker(seed_img, t_r=0.81, \
                     low_pass=0.1, high_pass=0.01 ,standardize='zscore')
                 seed_ts = np.squeeze(seed_masker.fit_transform(bold_img))
-                seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)
+                seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)/voxels_ts.shape[0]
                 seed_to_voxel_corr_img = brain_masker.inverse_transform(seed_to_voxel_corr.mean(axis=-1).T)
                 fname = '_'.join([subj,ses,metric,args.fwhm,atlas,seed,seed_suffix[args.seed_type],'corr.nii.gz'])
                 nib.save(seed_to_voxel_corr_img, os.path.join(out_dir, fname))
@@ -271,7 +271,7 @@ def sphere_seed_to_voxel(subj, ses, seeds, metrics, atlases=['Harrison2009'], ar
             seed_masker = NiftiSpheresMasker([np.array(seed_loc[seed])], radius=3.5, t_r=0.81, \
                                 low_pass=0.1, high_pass=0.01, verbose=0, standardize='zscore')
             seed_ts = np.squeeze(seed_masker.fit_transform(bold_img))
-            seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)
+            seed_to_voxel_corr = np.dot(voxels_ts.T, seed_ts)/voxels_ts.shape[0]
             seed_to_voxel_corr_img = brain_masker.inverse_transform(seed_to_voxel_corr)
             fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
             fname = '_'.join([subj,ses,metric,fwhm,atlas,seed,seed_suffix[args.seed_type],'corr.nii.gz'])
@@ -694,9 +694,9 @@ def plot_voi_corr(df_voi_corr, seeds = ['Acc', 'dPut', 'vPut'], args=None):
     plt.rcParams.update({'font.size': 20, 'axes.linewidth':2})
     ylim = [-0.5, 0.5]
     fig = plt.figure(figsize=[18,6])
-    df_voi_corr['corr'] = df_voi_corr['corr'] / 880.
-    df_voi_corr['corr'].loc[df_voi_corr['corr']>1] = 1
-    df_voi_corr['corr'].loc[df_voi_corr['corr']<-1] = -1
+    #df_voi_corr['corr'] = df_voi_corr['corr'] / 880.
+    #df_voi_corr['corr'].loc[df_voi_corr['corr']>1] = 1
+    #df_voi_corr['corr'].loc[df_voi_corr['corr']<-1] = -1
 
     # 1 row per seed, 4 columns: group, pre-post, group1 pre-post, group2 pre-post
     for i,seed in enumerate(seeds):
@@ -737,7 +737,7 @@ def plot_voi_corr(df_voi_corr, seeds = ['Acc', 'dPut', 'vPut'], args=None):
         if args.use_group_avg_stim_site:
             suffix = '_radius5mm_avg'
         else:
-            siffix = '_diam7mm_ind'
+            suffix = '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
         figname = 'seed_to_stim_VOI'+suffix+'_group_by_session.svg'
         plt.savefig(os.path.join(proj_dir, 'img', figname))
         #plt.savefig(os.path.join('/home/sebastin/tmp/', figname))
@@ -1390,7 +1390,8 @@ def plot_pointplot(df_summary, args):
 
 
         if args.save_figs:
-            fname = '_'.join(['point_plot_distrib',args.metrics[0],var,'indStim',datetime.now().strftime('%d%m%Y.pdf')])
+            fname = '_'.join(['point_plot_distrib',args.metrics[0],var,
+                            '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2)),datetime.now().strftime('%d%m%Y.pdf')])
             plt.savefig(os.path.join(proj_dir, 'img', fname))
 
         if args.plot_figs:
