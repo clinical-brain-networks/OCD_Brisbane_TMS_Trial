@@ -117,8 +117,8 @@ seed_ext =  { 'Harrison2009': '.nii.gz',
 
 group_colors = {'group1': 'orange', 'group2':'lightslategray'}
 
-pointplot_ylim = {  'Harrison2009': {'corr': [-0.5,0.5], 'fALFF':[1,2]},
-                    'TianS4': {'corr': [-0.01,0.01], 'fALFF':[1,2]},
+pointplot_ylim = {  'Harrison2009': {'corr': [-1,1], 'fALFF':[1,2]},
+                    'TianS4': {'corr': [-0.5,0.5], 'fALFF':[1,2]},
                 }
 
 
@@ -649,7 +649,7 @@ def compute_voi_corr(subjs, seeds = ['Acc', 'dPut', 'vPut'], args=None):
                     # load correlation map
                     if args.unilateral_seed:
                         fname = '_'.join([subj, ses, metric, fwhm, atlas, seed, seed_suffix[args.seed_type], 'corr'+seed_ext[args.seed_type]])
-                        fpath = os.path.join(proj_dir, 'postprocessing', subj, fname+'.gz')
+                        fpath = os.path.join(proj_dir, 'postprocessing', subj, fname)
                     else:
                         fname = '_'.join([subj, ses, metric, fwhm, atlas, seed, seed_suffix[args.seed_type], 'corr'+seed_ext[args.seed_type]])
                         fpath = os.path.join(proj_dir, 'postprocessing/SPM/input_imgs', args.seed_type, 'seed_not_smoothed',
@@ -1535,7 +1535,12 @@ if __name__=='__main__':
     #subrois = np.unique([seed[:-1] for seed in seeds])#['Acc', 'dCaud', 'dPut', 'vPut', 'drPut']
     seeds, subrois = get_seed_names(args)
     if args.unilateral_seed:
-        subrois = seeds
+        if args.seed_type=='Harrison2009':
+            seeds = [seed for seed in seeds if seed[-1]=='R']
+            subrois = seeds
+        else:
+            seeds = ['Right_'+seed for seed in seeds]
+            subrois = seeds
 
     seedfunc = {'Harrison2009':sphere_seed_to_voxel,
             'TianS4':seed_to_voxel}
