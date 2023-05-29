@@ -64,7 +64,7 @@ To extract those using a 5mm radius and a full-width half maxima spatial smoothi
 
     python functional/seed_to_voxel_analysis.py --compute_voi_corr --compute_ALFF --stim_radius 5 --brain_smoothing_fwhm 8 --save_outputs --plot_pointplot --print_stats
 
-The output should look like this _(extact values may differ according to parameters)_:
+The output should look like this _(exact values may differ according to parameters)_:
 ![FC_fALFF_outputs](screenshots/screenshot_FC_fALFF.jpg)
 
 ## Network-based Statistics (NBS)
