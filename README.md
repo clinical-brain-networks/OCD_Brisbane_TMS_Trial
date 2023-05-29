@@ -2,6 +2,8 @@ Clinical Trial OCD Neuroimaging
 =========================================
 Functional Neuroimaging analysis of OCD clinical trial data derived from baseline analysis. Check our baseline paper in Brain: [Naze et al. (2022)](https://academic.oup.com/brain/advance-article-abstract/doi/10.1093/brain/awac425/6830574)
 
+___Note___: *The statistical analysis from the* **Clinical outcomes** *section is in the* **R** *parent directory and is independent of the python package described below.*
+
 <!-- dependencies: pybct, h5py, nibabel, nilearn, pandas, scipy, sklearn, statsmodel.
      insert badges instead -->
 
