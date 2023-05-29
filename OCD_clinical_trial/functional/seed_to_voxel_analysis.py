@@ -145,57 +145,6 @@ def get_group(subj):
         return 'none'
 
 
-def create_design_matrix(subjs, args):
-    """ Create a more complex design matrix with group by hemisphere interactions """
-    n_1 = np.sum(['group1' in get_group(s) for s in subjs if s not in args.revoked])
-    n_2 = np.sum(['group2' in get_group(s) for s in subjs if s not in args.revoked])
-    if args.group_by_session:
-      if args.paired_design:
-        design_mat = np.eye((2*n_1+2*n_2))
-        design_matrix = pd.DataFrame(design_mat)
-      elif args.repeated2wayANOVA:
-        design_mat = np.zeros((2*n_1+2*n_2, n_1+n_2+2), dtype=int)
-        # subject means :
-        design_mat[:n_1,:n_1] = np.eye(n_1)
-        design_mat[n_1:2*n_1,:n_1] = np.eye(n_1)
-        design_mat[2*n_1:2*n_1+n_2,n_1:n_1+n_2] = np.eye(n_2)
-        design_mat[2*n_1+n_2:,n_1:n_1+n_2] = np.eye(n_2)
-        # session main effect:
-        design_mat[:n_1,-2] = 1
-        design_mat[n_1:2*n_1,-2] = -1
-        design_mat[-2*n_2:-n_2,-2] = 1
-        design_mat[-n_2:,-2] = -1
-        # group by session interaction
-        design_mat[:n_1,-1] = 1
-        design_mat[n_1:2*n_1,-1] = -1
-        design_mat[-2*n_2:-n_2,-1] = -1
-        design_mat[-n_2:,-1] = 1
-
-        design_matrix = pd.DataFrame(design_mat)
-      else:
-        design_mat = np.zeros((2*(n_1+n_2),4), dtype=int)
-
-        design_mat[:n_1, 0] = 1 # group1_pre
-        design_mat[n_1:2*n_1, 1] = 1 # group1_post
-        design_mat[-2*n_2:-n_2, 2] = 1 # group2_pre
-        design_mat[-n_2:, 3] = 1 # group2_post
-
-        design_matrix = pd.DataFrame()
-        design_matrix['group1_pre'] = design_mat[:,0]
-        design_matrix['group1_post'] = design_mat[:,1]
-        design_matrix['group2_pre'] = design_mat[:,2]
-        design_matrix['group2_post'] = design_mat[:,3]
-    else:
-        design_mat = np.zeros((n_1+n_2,2), dtype=int)
-        design_mat[:n_1,0] = 1
-        design_mat[-n_2:, 1] = 1
-
-        design_matrix = pd.DataFrame()
-        design_matrix['group1'] = design_mat[:,0]
-        design_matrix['group2'] = design_mat[:,1]
-    return design_matrix
-
-
 def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
     """ perform seed-to-voxel analysis of bold data based on atlas parcellation """
     # prepare output directory
@@ -220,10 +169,6 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
         voxels_ts = brain_masker.fit_transform(bold_img)
 
         for atlas in atlases:
-            # prepare output file
-            #hfname = subj+'_task-rest_'+atlas+'_desc-'+metric+'_'+''.join(seeds)+'_seeds_ts.h5'
-            #hf = h5py.File(os.path.join(deriv_dir, 'post-fmriprep-fix', subj, 'timeseries', hfname), 'w')
-
             # get atlas utility
             atlazer = atlaser.Atlaser(atlas)
 
@@ -237,8 +182,7 @@ def seed_to_voxel(subj, ses, seeds, metrics, atlases, args=None):
                 seed_to_voxel_corr_img = brain_masker.inverse_transform(seed_to_voxel_corr.mean(axis=-1).T)
                 fname = '_'.join([subj,ses,metric,args.fwhm,atlas,seed,seed_suffix[args.seed_type],'corr.nii.gz'])
                 nib.save(seed_to_voxel_corr_img, os.path.join(out_dir, fname))
-                #hf.create_dataset(seed+'_ts', data=seed_ts)
-            #hf.close()
+
     print('{} seed_to_voxel performed in {}s'.format(subj,int(time()-t0)))
 
 
@@ -312,42 +256,6 @@ def merge_LR_hemis(subjs, seeds, seses, metrics, seed_type='sphere_seed_to_voxel
     return in_fnames
 
 
-def prep_fsl_randomise(in_fnames, seeds, metrics, args):
-    """ prepare 4D images for FSL randomise """
-    gm_mask = datasets.load_mni152_gm_mask()
-    masker = NiftiMasker(gm_mask)
-
-    ind_mask = False  # whether to apply GM mask to individual 3D images separatetely or already combined in 4D image
-    fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-
-    for metric,seed in itertools.product(metrics,seeds):
-        if ind_mask:
-            imgs = None
-            for in_fname in in_fnames[(seed,metric)]:
-                img = load_img(in_fname)
-                masker.fit(img)
-                masker.generate_report()
-                masked_data = masker.transform(img)
-                masked_img = masker.inverse_transform(masked_data)
-                if imgs==None:
-                    imgs = img
-                else:
-                    imgs = nilearn.image.concat_imgs([imgs, masked_img], auto_resample=True)
-        else:
-            img = nilearn.image.concat_imgs(in_fnames[(seed,metric)], auto_resample=True, verbose=0)
-            masker.fit(img)
-            masker.generate_report()
-            masked_data = masker.transform(img)
-            imgs = masker.inverse_transform(masked_data) #nib.Nifti1Image(masked_data, img.affine, img.header)
-        nib.save(imgs, os.path.join(args.in_dir, metric, fwhm, 'masked_resampled_pairedT4D_'+seed))
-
-    # saving design matrix and contrast
-    design_matrix = create_design_matrix(subjs, args)
-    design_con = np.hstack((1, -1)).astype(int)
-    np.savetxt(os.path.join(args.in_dir, metric, fwhm, 'design_mat'), design_matrix, fmt='%i')
-    np.savetxt(os.path.join(args.in_dir, metric, fwhm, 'design_con'), design_con, fmt='%i', newline=' ')
-
-
 def unzip_correlation_maps(subjs, seses, metrics, atlases, seeds, args):
     """ extract .nii files from .nii.gz and put them in place for analysis with SPM (not used if only analysing with nilearn) """
     fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
@@ -390,35 +298,6 @@ def get_subjs_after_scrubbing(subjs, seses, metrics, min_time=5):
     subjs = subjs.drop(np.unique(rev_inds))
     return subjs, np.unique(revoked)
 
-
-def create_local_sphere_within_cluster(vois, rois, metrics, args=None, sphere_radius=3.5):
-    """ create a sphere VOIs of given radius within cluster VOIs (for DCM analysis) """
-    max_locals = dict( ( ( (roi,metric) , {'controls':[], 'patients':[]}) for roi,metric in itertools.product(rois, metrics) ) )
-    for metric in metrics:
-        for roi,voi in zip(roi,vois):
-            for subj in subjs:
-                if 'control' in subj:
-                    coh = 'controls'
-                else:
-                    coh = 'patients'
-
-                fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-                corr_file = '_'.join([subj,metric,fwhm,atlas,roi,'ns_sphere_roi_to_voxel_corr.nii'])
-                corr_fname = os.path.join(corr_path, roi, coh, corr_file)
-                img = load_img(corr_fname)
-                mask = load_img(baseline_dir+'/postprocessing/SPM/rois_and_rois/'+voi+'.nii')
-                mask = nilearn.image.new_img_like(img, mask.get_fdata())
-                new_data = np.abs(img.get_fdata()) * mask.get_fdata()
-                local_max = new_data.max()
-                max_coords = np.where(new_data>=local_max)
-                local_max_coords = nilearn.image.coord_transform(max_coords[0], max_coords[1], max_coords[2], img.affine)
-                new_mask = nltools.create_sphere(local_max_coords, radius=sphere_radius)
-                out_path = os.path.join(baseline_dir, 'postprocessing', subj, 'spm', 'masks')
-                os.makedirs(out_path, exist_ok=True)
-                fname = os.path.join(out_path, 'local_'+voi+'_'+metric+'.nii')
-                nib.save(new_mask, fname)
-                max_locals[roi,metric][coh].append(new_mask)
-    return max_locals
 
 
 def resample_masks(masks):
@@ -467,39 +346,6 @@ def mask_imgs(flist, masks=[], seed=None, args=None):
     print('Masking took {:.2f}s'.format(time()-t_mask))
     return imgs, masker, mask
 
-def perform_second_level_analysis(seed, metric, design_matrix, cohorts=['controls', 'patients'], args=None, masks=[]):
-    """ Perform second level analysis based on seed-to-voxel correlation maps """
-    # naming convention in file system
-    fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-
-    # get images path
-    con_flist = glob.glob(os.path.join(args.in_dir, metric, fwhm, seed, 'controls', '*'))
-    pat_flist = glob.glob(os.path.join(args.in_dir, metric, fwhm, seed, 'patients', '*'))
-    flist = np.hstack([con_flist, pat_flist])
-
-    # remove revoked subjects
-    if args.revoked != []:
-        flist = [l for l in flist if ~np.any([s in l for s in revoked])]
-
-    imgs, masker, mask = mask_imgs(flist, masks=masks, seed=seed, args=args)
-
-    # perform analysis
-    t_glm = time()
-    glm = SecondLevelModel(mask_img=masker)
-    glm.fit(imgs, design_matrix=design_matrix)
-    print('GLM fitting took {:.2f}s'.format(time()-t_glm))
-
-    contrasts = dict()
-    t0 = time()
-    contrasts['within_con'] = glm.compute_contrast(np.array([1, 0]), output_type='all')
-    t1 = time()
-    contrasts['within_pat'] = glm.compute_contrast(np.array([0, 1]), output_type='all')
-    t2 =  time()
-    contrasts['between'] = glm.compute_contrast(np.array([1, -1]), output_type='all')
-    print('within groups and between group contrasts took {:.2f}, {:.2f} and {:.2f}s'.format(t1-t0, t2-t1, time()-t2))
-    n_voxels = np.sum(nilearn.image.get_data(glm.masker_.mask_img_))
-    params = glm.get_params()
-    return contrasts, n_voxels, params
 
 def threshold_contrast(contrast, height_control='fpr', alpha=0.005, cluster_threshold=10):
     """ cluster threshold contrast at alpha with height_control method for multiple comparisons """
@@ -510,107 +356,6 @@ def threshold_contrast(contrast, height_control='fpr', alpha=0.005, cluster_thre
         two_sided=True, min_distance=5.0)
     return thresholded_img, thresh, cluster_table
 
-def create_within_group_mask(subroi_glm_results, args):
-    """ create within group masks to use for between group contrasts to improve SNR """
-    con_img, con_thr, c_table = threshold_contrast(subroi_glm_results['first_pass', 'contrasts']['within_con']['z_score'],
-                                    cluster_threshold=100, alpha=args.within_group_threshold)
-    con_mask = binarize_img(con_img, threshold=con_thr)
-    pat_img, pat_thr, c_table = threshold_contrast(subroi_glm_results['first_pass', 'contrasts']['within_pat']['z_score'],
-                                    cluster_threshold=100, alpha=args.within_group_threshold)
-    pat_mask = binarize_img(pat_img, threshold=pat_thr)
-    mask = nilearn.masking.intersect_masks([con_mask, pat_mask], threshold=1, connected=False) # thr=1: intersection; thr=0: union
-    return mask, con_mask, pat_mask
-
-
-def run_second_level(subjs, metrics, subrois, args):
-    """ Run second level analysis """
-    design_matrix = create_design_matrix(subjs, args)
-
-    glm_results = dict()
-    for metric,subroi in itertools.product(metrics,subrois):
-        print('Starting 2nd level analysis for '+subroi+' subroi.')
-        t0 = time()
-        glm_results[subroi] = dict()
-
-        t_fp = time()
-        contrasts, n_voxels, params = perform_second_level_analysis(subroi, metric, design_matrix, args=args, masks=[])
-        glm_results[subroi]['first_pass','contrasts'], glm_results[subroi]['n_voxels'], glm_results[subroi]['first_pass','params'] = contrasts, n_voxels, params
-        print('{} first pass in {:.2f}s'.format(subroi,time()-t_fp))
-
-        passes = ['first_pass']
-
-        if args.use_within_group_mask:
-            t_wmask = time()
-            within_group_mask, con_mask, pat_mask = create_within_group_mask(glm_results[subroi], args)
-            glm_results[subroi]['within_group_mask'], glm_results[subroi]['con_mask'], glm_results[subroi]['pat_mask'] = within_group_mask, con_mask, pat_mask
-            print('created within groups mask in {:.2f}s'.format(time()-t_wmask))
-
-            t_sp = time()
-            contrasts, n_voxels, params = perform_second_level_analysis(subroi, metric, design_matrix, args=args, masks=[within_group_mask])
-            glm_results[subroi]['second_pass','contrasts'], glm_results[subroi]['n_voxels'], glm_results[subroi]['second_pass','params'] = contrasts, n_voxels, params
-            print('{} second pass in {:.2f}s'.format(subroi,time()-t_sp))
-
-            passes.append('second_pass')
-
-        # Correcting the p-values for multiple testing and taking negative logarithm
-        #neg_log_pval = nilearn.image.math_img("-np.log10(np.maximum(1, img * {}))"
-        #                .format(str(glm_results[subroi]['n_voxels'])),
-        #                img=glm_results[subroi]['contrasts']['between']['p_value'])
-        #glm_results[subroi]['neg_log_pval'] = neg_log_pval
-
-        t_thr = time()
-        for pss in passes:
-            glm_results[subroi][(pss,'fpr',args.fpr_threshold,'thresholded_img')], \
-                glm_results[subroi][(pss,'fpr',args.fpr_threshold,'thresh')], \
-                glm_results[subroi][(pss,'fpr',args.fpr_threshold,'cluster_table')] = threshold_contrast( \
-                                glm_results[subroi][pss,'contrasts']['between']['z_score'])
-
-            print(' '.join([subroi,pss,'clusters at p<{:.3f} uncorrected:'.format(args.fpr_threshold)]))
-            print(glm_results[subroi][(pss,'fpr',args.fpr_threshold,'cluster_table')])
-
-            glm_results[subroi][(pss,'fdr',args.fdr_threshold,'thresholded_img')], \
-                glm_results[subroi][(pss,'fdr',args.fdr_threshold,'thresh')], \
-                glm_results[subroi][(pss,'fdr',args.fdr_threshold,'cluster_table')] = threshold_contrast( \
-                                glm_results[subroi][pss,'contrasts']['between']['z_score'], height_control='fdr', alpha=args.fdr_threshold)
-
-            print(' '.join([subroi,pss,'clusters at p<{:.2f} FDR corrected:'.format(args.fdr_threshold)]))
-            print(glm_results[subroi][(pss,'fdr',args.fdr_threshold,'cluster_table')])
-
-        print('Thresholding and clustering took {:.2f}s'.format(time()-t_thr))
-
-        if args.plot_figs:
-            t_plt = time()
-            for pss in passes:
-                fig = plt.figure(figsize=[16,4])
-                ax1 = plt.subplot(1,2,1)
-                plot_stat_map(glm_results[subroi][pss,'contrasts']['between']['stat'], draw_cross=False, threshold=glm_results[subroi][(pss,'fpr',args.fpr_threshold,'thresh')],
-                                axes=ax1, title='_'.join([pss,subroi,'contrast_fpr'+str(args.fpr_threshold)]))
-                ax2 = plt.subplot(1,2,2)
-                plot_stat_map(glm_results[subroi][pss,'contrasts']['between']['stat'], draw_cross=False, threshold=glm_results[subroi][(pss,'fdr',args.fdr_threshold,'thresh')],
-                                axes=ax2, title='_'.join([pss,subroi,'contrast_fdr'+str(args.fdr_threshold)]))
-                print('{} plotting took {:.2f}s'.format(subroi,time()-t_plt))
-
-                if args.save_figs:
-                    plot_stat_map(glm_results[subroi][pss,'contrasts']['between']['stat'], draw_cross=False, threshold=glm_results[subroi][(pss,'fpr',args.fpr_threshold,'thresh')],
-                    output_file=os.path.join(args.out_dir,subroi+'_'+pss+'_contrast_fpr{:.3f}.pdf'.format(args.fpr_threshold)))
-
-        print('Finished 2nd level analysis for '+subroi+' ROI in {:.2f}s'.format(time()-t0))
-
-    # savings
-    if args.save_outputs:
-        suffix = '_'+metric
-        if args.min_time_after_scrubbing!=None:
-            suffix += '_minLength'+str(int(args.min_time_after_scrubbing*10))
-        if args.use_fspt_mask:
-            suffix += '_fsptMask'
-        if args.use_cortical_mask:
-            suffix += '_corticalMask'
-        today = datetime.datetime.now().strftime("%Y%m%d")
-        suffix += '_'+today
-        with gzip.open(os.path.join(args.out_dir,'glm_results'+suffix+'.pkl.gz'), 'wb') as of:
-            pickle.dump(glm_results, of)
-
-    return glm_results
 
 
 def get_subj_stim_mask(subj, args):
@@ -694,10 +439,7 @@ def plot_voi_corr(df_voi_corr, seeds = ['Acc', 'dPut', 'vPut'], args=None):
     plt.rcParams.update({'font.size': 20, 'axes.linewidth':2})
     ylim = [-0.5, 0.5]
     fig = plt.figure(figsize=[18,6])
-    #df_voi_corr['corr'] = df_voi_corr['corr'] / 880.
-    #df_voi_corr['corr'].loc[df_voi_corr['corr']>1] = 1
-    #df_voi_corr['corr'].loc[df_voi_corr['corr']<-1] = -1
-
+    
     # 1 row per seed, 4 columns: group, pre-post, group1 pre-post, group2 pre-post
     for i,seed in enumerate(seeds):
       # group difference
@@ -766,122 +508,6 @@ def print_voi_stats(df_voi_corr, seeds = ['Acc', 'dPut', 'vPut'], args=None):
             print("{} {} {} {} pre-post  T={:.3f}   p={:.3f}   cohen's d={:.2f}".format(atlas,metric,fwhm,key,t,p,d))
 
 
-def compute_non_parametric_within_groups_mask(con_flist, pat_flist, design_matrix, masks, seed, args):
-    """ reconstruct within-group masks using non-parametric inference """
-    # controls
-    imgs, masker, mask = mask_imgs(con_flist, masks=masks, seed=seed, args=args)
-    neg_log_pvals_within_con = non_parametric_inference(list(np.sort(con_flist)),
-                                 design_matrix=pd.DataFrame(np.ones([len(con_flist),1])),
-                                 model_intercept=True, n_perm=args.n_perm,
-                                 two_sided_test=args.two_sided_within_group, mask=masker, n_jobs=10, verbose=1)
-    within_con_mask = binarize_img(neg_log_pvals_within_con, threshold=0.) # -log(p)>1.3 corresponds to p<0.05 (p are already bonferroni corrected)
-    # patients
-    imgs, masker, mask = mask_imgs(pat_flist, masks=masks, seed=seed, args=args)
-    neg_log_pvals_within_pat = non_parametric_inference(list(np.sort(pat_flist)),
-                                 design_matrix=pd.DataFrame(np.ones([len(pat_flist),1])),
-                                 model_intercept=True, n_perm=args.n_perm,
-                                 two_sided_test=args.two_sided_within_group, mask=masker, n_jobs=10, verbose=1)
-    within_pat_mask = binarize_img(neg_log_pvals_within_pat, threshold=0.) # -log(p)>1.3 corresponds to p<0.05 (p are already bonferroni corrected)
-    within_groups_mask = nilearn.masking.intersect_masks([within_con_mask, within_pat_mask], threshold=0, connected=False) # thr=0:union, thr=1:intersection
-    return within_groups_mask
-
-
-def non_parametric_analysis(subjs, seed, metric, pre_metric, masks=[], args=None):
-    """ Performs a non-parametric inference """
-    post_metric = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-    in_dir = os.path.join(baseline_dir, 'postprocessing/SPM/input_imgs/', args.seed_type, pre_metric, metric, post_metric)
-
-    # create imgs file list
-    con_flist = glob.glob(os.path.join(in_dir, seed, 'controls', '*'))
-    pat_flist = glob.glob(os.path.join(in_dir, seed, 'patients', '*'))
-    pat_flist = [pf for pf in pat_flist if 'sub-patient16' not in pf]
-    flist = np.hstack([con_flist, pat_flist])
-
-    design_matrix = create_design_matrix(subjs, args)
-
-    if args.use_SPM_mask:
-        # template masking (& SPM within-group masks) need to be set manually via commenting others
-        mask = os.path.join(baseline_dir, 'postprocessing/SPM/outputs/',args.seed_type, 'smoothed_but_sphere_seed_based', metric, seed, 'scrub_out_1/'+seed+'_fl_0001unc_005fwe.nii.gz') # within-group
-        #fspt_mask = binarize_img(os.path.join(baseline_dir, 'utils', 'Larger_FrStrPalThal_schaefer100_tianS1MNI_lps_mni.nii.gz')) # fronto-striato-pallido-thalamic (fspt) mask
-        #gm_mask = os.path.join(baseline_dir, 'utils', 'schaefer_cortical.nii.gz') # gray matter only
-    elif args.use_within_group_mask:
-        # create within-group masks non-parametrically
-        mask = compute_non_parametric_within_groups_mask(con_flist, pat_flist, design_matrix, masks, seed, args)
-    else:
-        imgs, masker, mask = mask_imgs(flist, masks=masks, seed=seed, args=args)
-
-    # between-groups non-parametric inference
-    neg_log_pvals_permuted_ols_unmasked = \
-        non_parametric_inference(list(np.sort(flist)),
-                                 design_matrix=pd.DataFrame(design_matrix['con'] - design_matrix['pat']),
-                                 model_intercept=True, n_perm=args.n_perm,
-                                 two_sided_test=args.two_sided_between_group, mask=mask, n_jobs=10, verbose=1)
-
-    return neg_log_pvals_permuted_ols_unmasked, mask
-
-def plot_non_param_maps(neg_log_pvals, seed, suffix, args=None):
-    """ plot and save outputs of the non-parametric analysis """
-    if args.plot_figs:
-        plot_stat_map(neg_log_pvals, threshold=0.2, colorbar=True, title=' '.join([seed,suffix]), draw_cross=False) #cut_coords=[-24,55,34]
-    if args.save_figs:
-        plot_stat_map(neg_log_pvals, threshold=0.2, colorbar=True, title=' '.join([seed,suffix]), draw_cross=False,
-                      output_file=os.path.join(baseline_dir, 'img', '_'.join([seed,suffix])+'.pdf')) #cut_coords=[-24,55,34]
-
-
-def compute_FC_within_masks(subjs, np_results, seeds = ['Acc', 'dPut', 'vPut'], args=None):
-    """ compute FC within masks used for the between-group analysis """
-    dfs = []
-    fwhm = 'brainFWHM{}mm'.format(int(args.brain_smoothing_fwhm))
-    for atlas,metric in itertools.product(args.atlases, args.metrics):
-        for subj in subjs:
-            if 'control' in subj:
-                cohort = 'controls'
-            else:
-                cohort = 'patients'
-            for seed in seeds:
-                # load correlation map
-                fname = '_'.join([subj, metric, fwhm, atlas, seed, 'ns_sphere_seed_to_voxel_corr.nii'])
-                corr_map = load_img(os.path.join(baseline_dir, 'postprocessing/SPM/input_imgs/', args.seewd_type, 'seed_not_smoothed',
-                                    metric, fwhm, seed, cohort, fname))
-                voi_mask = resample_to_img(np_results[seed]['mask'], corr_map, interpolation='nearest')
-
-                # extract correlations
-                voi_corr = corr_map.get_fdata().copy() * voi_mask.get_fdata().copy()
-                for corr in np.ravel(voi_corr[voi_corr!=0]):
-                    df_line = {'subj':subj, 'metric':metric, 'atlas':atlas, 'fwhm':fwhm, 'cohort':cohort, 'seed':seed, 'corr':corr}
-                    dfs.append(df_line)
-    df_mask_corr = pd.DataFrame(dfs)
-    return df_mask_corr
-
-def plot_within_mask_corr(df_mask_corr, seeds = ['Acc', 'dPut', 'vPut'], args=None):
-    """ bar plots of FC in pahtways """
-    colors = ['lightgrey', 'darkgrey']
-    sbn.set_palette(colors)
-    plt.rcParams.update({'font.size': 20, 'axes.linewidth':2})
-    ylim = [-0.15, 0.3]
-    fig = plt.figure(figsize=[12,6])
-    df_mask_corr['corr'] = df_mask_corr['corr'] / 880.
-    df_mask_corr['corr'].loc[df_mask_corr['corr']>1] = 1
-    df_mask_corr['corr'].loc[df_mask_corr['corr']<-1] = -1
-
-    for i,seed in enumerate(seeds):
-      ax = plt.subplot(1,len(seeds),i+1)
-      #sbn.barplot(data=df_mask_corr[df_mask_corr['seed']==seed], y='corr', x='seed', hue='cohort', orient='v')
-      #sbn.swarmplot(data=df_mask_corr[df_mask_corr['seed']==seed], y='corr', x='seed', hue='cohort', orient='v', dodge=True, size=0.1)
-      sbn.violinplot(data=df_mask_corr[df_mask_corr['seed']==seed], y='corr', x='seed', hue='cohort', orient='v', split=True, scale_hue=True,
-                     inner='quartile', dodge=True, width=0.8, cut=1)
-      ax.spines['top'].set_visible(False)
-      ax.spines['right'].set_visible(False)
-      ax.tick_params(width=2)
-      if i==len(seeds)-1:
-        plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-      else:
-        ax.get_legend().set_visible(False)
-      plt.tight_layout()
-
-    if args.save_figs:
-        figname = 'seed_to_mask_corr_3seeds.svg'
-        plt.savefig(os.path.join(baseline_dir, 'img', figname))
 
 
 def get_file_lists(subjs, seed, atlas, metric, args):
@@ -925,199 +551,6 @@ def get_file_lists(subjs, seed, atlas, metric, args):
     return group1_flist, group2_flist, flist
 
 
-def create_contrast_vector(subjs, args):
-    """ create contrast vector based on options given in arguments (default: only group difference) """
-    suffix = ''
-    n_1 = np.sum(['group1' in get_group(s) for s in subjs if s not in args.revoked])
-    n_2 = np.sum(['group2' in get_group(s) for s in subjs if s not in args.revoked])
-    if args.group_by_session:
-        suffix += '_group_by_session'
-        if args.paired_design:
-          cv = []
-          #cv.append(np.ones([1,1+n_1+n_2]))
-          #cv.append(np.concatenate([-np.ones([1,1]).ravel(), np.ones([1,n_1+n_2]).ravel()]))
-          #cv.append(np.concatenate([-np.ones([1,1]).ravel(), -np.ones([1,n_1+n_2]).ravel()]))
-          #cv.append(np.concatenate([np.ones([1,1]).ravel(), -np.ones([1,n_1+n_2]).ravel()]))
-          cv.append(np.concatenate([np.ones((1,2*n_1)).ravel(), -np.ones((1,2*n_2)).ravel()]))
-          cv.append(np.concatenate([np.ones((1,n_1)).ravel(), -np.ones((1,n_1)).ravel(), np.ones((1,n_2)).ravel(), -np.ones((1,n_2)).ravel()]))
-          cv.append(np.concatenate([np.ones((1,n_1)).ravel(), -np.ones((1,n_1)).ravel(), -np.ones((1,n_2)).ravel(), np.ones((1,n_2)).ravel()]))
-          cv = np.array(cv)
-          suffix += '_paired'
-        elif args.repeated2wayANOVA:
-          cv = np.zeros( (6, n_1 + n_2 + 2) ) # 3 contrasts (one positive + one negative each)
-          # group main effect
-          cv[0,:n_1] = 1
-          cv[0,n_1:n_1+n_2] = -1
-          cv[1,:n_1] = -1
-          cv[1,n_1:n_1+n_2] = 1
-          # session  main effect
-          cv[2,-2] = 1
-          cv[3,-2] = -1
-          # interactions
-          cv[4,-1] = 1
-          cv[5,-1] = -1
-          # F test
-          cm = np.array([[1,1,0,0,0,0], [0,0,1,1,0,0], [0,0,0,0,1,1]])
-          #grp = np.ones((2*n_1+2*n_2,1))
-          grp = np.concatenate([np.arange(n_1), np.arange(n_1), np.arange(n_1,n_1+n_2), np.arange(n_1,n_1+n_2)])+1 # offset of 1 because not sure what 0 would d
-          suffix += '_grp123_repeated2wayANOVA'
-        else:
-            cv = np.array([[1,1,-1,-1], [1,-1,1,-1], [1,-1,-1,1], [1,-1,0,0], [0,0,1,-1]])
-            cm = np.array([[1,0,0,0,0], [0,1,0,0,0], [0,0,1,0,0], [0,0,0,1,-1]])
-            #grp = np.ones((2*n_1+2*n_2,1))
-            grp = np.concatenate([np.arange(n_1), np.arange(n_1), np.arange(n_1,n_1+n_2), np.arange(n_1,n_1+n_2)])+1 # offset of 1 because not sure what 0 would d
-        suffix += '_Ftest'
-    else:
-        if args.OCD_minus_HC:
-            cv = np.array([[-1, 1]])
-            suffix += '_group2_minus_group1'
-            con_type = 't'
-        else:
-            cv = np.array([[1, -1]])
-            suffix += '_group1_minus_group2'
-            con_type = 't'
-        grp = np.ones((n_1+n_2,1))
-        cm = np.array([[1]])
-        suffix += '_Ftest'
-    return cv.astype(int), cm.astype(int), grp.astype(int), suffix
-
-def get_final_suffix(dcon, dfts, dgrp, mask_file, suffix, args):
-    """ create suffix (options) for the FSL randomise command and its output file """
-    cmd_suffix = ' ' # start with suffix
-    file_suffix = suffix+'_outputs_n'+str(args.n_perm)
-    if args.compute_t_contrasts:
-        cmd_suffix += (' -t '+dcon)
-    if args.compute_f_contrasts:
-        cmd_suffix += (' -f '+dfts)
-    cmd_suffix += (' -e '+dgrp+' -m '+mask_file+' -n '+str(args.n_perm))
-    if args.permuteBlocks:
-        cmd_suffix += ' --permuteBlocks'
-        file_suffix += '_permuteBlocks'
-    if args.use_TFCE:
-        cmd_suffix += (' -T --uncorrp')
-    else:
-        cmd_suffix += (' -c '+str(args.cluster_thresh)+' --uncorrp')
-        file_suffix += '_c'+str(int(args.cluster_thresh*10))
-    file_suffix += datetime.now().strftime('_%d%m%Y')
-    return cmd_suffix, file_suffix
-
-
-
-def use_randomise(subjs, seed, atlas, metric, args=None):
-    """ perform non-parametric inference using FSL randomise and cluster-based enhancement """
-    fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-    _,_,flist = get_file_lists(subjs, seed, atlas, metric, args)
-
-    # create 4D image from list of 3D
-    imgs_4D = nilearn.image.concat_imgs(flist, auto_resample=True)
-
-    dm = create_design_matrix(subjs, args)
-    cv, cm, grp, suffix = create_contrast_vector(subjs, args)
-
-    # outputs/savings to file
-    out_dir = os.path.join(proj_dir, 'postprocessing/SPM/outputs/', args.seed_type, 'smoothed_but_sphere_seed_based', metric, fwhm, seed, 'randomise')
-    os.makedirs(out_dir, exist_ok=True)
-
-    # set mask
-    mask_file = os.path.join(out_dir, seed+'_pathway_mask'+suffix+'.nii.gz')
-    _,_,mask = mask_imgs(flist, seed=seed, masks=[],  args=args)
-    mask = resample_to_img(mask, imgs_4D, interpolation='nearest')
-    nib.save(mask, mask_file)
-
-    # set paths for design, t contrasts, f contrasts, and exchange block files
-    dmat = os.path.join(out_dir, 'design.mat')
-    dcon = os.path.join(out_dir, 'design.con')
-    dfts = os.path.join(out_dir, 'design.fts')
-    dgrp = os.path.join(out_dir, 'design.grp')
-
-    cmd_suffix, file_suffix = get_final_suffix(dcon, dfts, dgrp, mask_file, suffix, args)
-
-    dm.to_csv(os.path.join(out_dir, 'design_mat'+file_suffix), sep=' ', index=False, header=False)
-    np.savetxt(os.path.join(out_dir, 'design_con'+file_suffix), cv, fmt='%i')
-    np.savetxt(os.path.join(out_dir, 'design_fts'+file_suffix), cm, fmt='%i')
-    np.savetxt(os.path.join(out_dir, 'design_grp'+file_suffix), grp, fmt='%i')
-
-    os.system('Text2Vest {} {}'.format(os.path.join(out_dir, 'design_mat'+file_suffix), dmat))
-    os.system('Text2Vest {} {}'.format(os.path.join(out_dir, 'design_con'+file_suffix), dcon))
-    os.system('Text2Vest {} {}'.format(os.path.join(out_dir, 'design_fts'+file_suffix), dfts))
-    os.system('Text2Vest {} {}'.format(os.path.join(out_dir, 'design_grp'+file_suffix), dgrp))
-
-    in_file = os.path.join(out_dir, seed+'_imgs_4D'+file_suffix+'.nii.gz')
-    nib.save(imgs_4D, in_file)
-
-    out_file = os.path.join(out_dir, seed+file_suffix)
-    cmd = 'randomise -i '+in_file+' -o '+out_file+' -d '+dmat + cmd_suffix
-
-    print(cmd)
-    #pdb.set_trace()
-    os.system(cmd)
-    os.remove(in_file)
-
-
-def plot_randomise_outputs(subjs, seed, metric, args, stat='t'):
-    """ plot the outcomes of the non-paramteric infernece using randomise and TFCE """
-    locs = {'Acc':None,
-            'dCaud':None,
-            'dPut':None,
-            'vPut':[-49,30,12],
-            'NucleusAccumbens':None}
-    fwhm = 'brainFWHM{}mm'.format(str(int(args.brain_smoothing_fwhm)))
-    cv,cm,grp,suffix = create_contrast_vector(subjs, args)
-
-    #suffix += '_noExBlocks_07092022'#+datetime.now().strftime('%d%m%Y')
-    out_dir = os.path.join(proj_dir, 'postprocessing/SPM/outputs/', args.seed_type, 'smoothed_but_sphere_seed_based', metric, fwhm, seed, 'randomise')
-
-    suffix += '_outputs_n'+str(args.n_perm)
-    if args.permuteBlocks:
-        suffix += '_permuteBlocks'
-    if not args.use_TFCE:
-        suffix += '_c'+str(int(args.cluster_thresh*10))
-    suffix += datetime.now().strftime('_%d%m%Y')
-
-    for i in np.arange(1,4):
-
-        plt.figure(figsize=[16,12])
-
-        # FWE p-values
-        out_file = os.path.join(out_dir, seed+suffix+'_tfce_corrp_'+stat+'stat{}.nii.gz'.format(i))
-        ax1 = plt.subplot(3,2,1)
-        plot_stat_map(out_file, axes=ax1, draw_cross=False, title=seed+' randomise -- corrp {}stat{}'.format(stat,i))
-        ax2 = plt.subplot(3,2,2)
-        plot_stat_map(out_file, threshold=0.95, axes=ax2, draw_cross=False, cmap='Oranges',
-                        title=seed+' randomise -- corrp>0.95 (p<0.05)',
-                        cut_coords=locs[seed])
-
-        # stats
-        out_file = os.path.join(out_dir, seed+suffix+'_{}stat{}.nii.gz'.format(stat,i))
-        ax3 = plt.subplot(3,2,3)
-        plot_stat_map(out_file, axes=ax3, draw_cross=False, title=seed+' randomise -- {}stat{}'.format(stat,i))
-        ax4 = plt.subplot(3,2,4)
-        plot_stat_map(out_file, threshold=args.cluster_thresh, axes=ax4, draw_cross=False, cmap='Oranges', title=seed+' randomise -- {}stat{}>{:.1f}'.format(stat,i,args.cluster_thresh))
-
-        # FDR p-vals
-        out_file = os.path.join(out_dir, seed+suffix+'_tfce_p_{}stat{}.nii.gz'.format(stat,i))
-        ax5 = plt.subplot(3,2,5)
-        plot_stat_map(out_file, axes=ax5, draw_cross=False, title=seed+' p_unc '+stat+'stat'+str(i))
-        ax6 = plt.subplot(3,2,6)
-        plot_stat_map(out_file, threshold=0.999, axes=ax6, draw_cross=False, cmap='Oranges', title=seed+' p_unc<0.001 '+stat+'stat'+str(i))
-
-
-def plot_within_group_masks(subrois, glm_results, args):
-    """ display maps of within-group contrasts """
-    for subroi in subrois:
-        plt.figure(figsize=[18,4])
-        ax1 = plt.subplot(1,3,1)
-        plot_stat_map(glm_results[subroi]['con_mask'],
-                    axes=ax1, title=subroi+' within_con p<{}'.format(args.fpr_threshold),
-                    cut_coords=cut_coords[subroi], draw_cross=False, cmap='Oranges', colorbar=False)
-        ax2 = plt.subplot(1,3,2)
-        plot_stat_map(glm_results[subroi]['pat_mask'],
-                    axes=ax2, title=subroi+' within_pat p<{}'.format(args.fpr_threshold),
-                    cut_coords=cut_coords[subroi], draw_cross=False, cmap='Oranges', colorbar=False)
-        ax3 = plt.subplot(1,3,3)
-        plot_stat_map(glm_results[subroi]['within_group_mask'],
-                    axes=ax3, title=subroi+' within-group mask p<{}'.format(args.fpr_threshold),
-                    cut_coords=cut_coords[subroi], draw_cross=False, cmap='Oranges', colorbar=False)
 
 
 
@@ -1141,13 +574,8 @@ def compute_ALFF(subj, args=None):
             continue
         ts = stim_masker.fit()
         ts = stim_masker.transform_single_imgs(bold_file)
-        #stim_mask = resample_to_img(stim_mask, bold_file, interpolation='nearest')
-        #ts = nilearn.masking.apply_mask(bold_file, stim_mask, smoothing_fwhm=args.brain_smoothing_fwhm)
 
         freqs, Pxx = scipy.signal.welch(ts.squeeze(), fs=1./0.81, scaling='spectrum', nperseg=64, noverlap=32)
-        #freqs, Pxx = scipy.signal.periodogram(ts.squeeze().astype(float), fs=1./0.81, scaling='spectrum', detrend=False, window='hann')
-        #Pxx, freqs = plt.psd(ts.squeeze(), Fs=1./0.81);
-        #Pxx = np.sqrt(Pxx)
         if np.isnan(Pxx).any():
             print(subj +' PSD has NaNs, discard.')
             continue
@@ -1185,9 +613,6 @@ def plot_ALFF(df_summary, args):
         plt.savefig(os.path.join(proj_dir, 'img', 'ALFF_fALFF_stim_site_'+str(args.stim_radius)+'mm.svg'))
 
 
-def compute_diff_ALFF(df_alff, args):
-    """ t-test on individual's ALFF at sim site """
-    return
 
 def compute_nbs(subjs, args):
     """ Network Based Statistics """
@@ -1374,18 +799,6 @@ def plot_pointplot(df_summary, args):
         ax5.fill(y,x, color=group_colors['group1'], alpha=0.5)
         ax5.plot([0,mu],[data[var].mean(), data[var].mean()], '-', color=group_colors['group1'])
 
-        """
-        for i,group in enumerate(['group2', 'group1']):
-            if group=='group1':
-                plt.sca(ax4)
-                ax = plt.gca()
-            else:
-                plt.sca(ax3)
-                ax = plt.gca()
-            sbn.violinplot(data=df_summary[df_summary.group==group], x='group', y=var, hue='ses', dodge=True, split=True, palette={'ses-pre':group_colors[group], 'ses-post':group_colors[group]}, linewidth=1, inner='quartile', scale='width')
-            plt.setp(ax.collections, alpha=.5)
-            plt.legend().set_visible(False)
-        """
         plt.tight_layout()
 
 
@@ -1463,7 +876,6 @@ if __name__=='__main__':
     parser.add_argument('--n_jobs', type=int, default=10, action='store', help="number of parallel processes launched")
     parser.add_argument('--plot_figs', default=False, action='store_true', help='plot figures')
     parser.add_argument('--subj', default=None, action='store', help='to process a single subject, give subject ID (default: process all subjects)')
-    parser.add_argument('--run_second_level', default=False, action='store_true', help='run second level statistics')
     parser.add_argument('--use_gm_mask', default=False, action='store_true', help='use a whole brain gray matter mask to reduce the space of the second level analysis')
     parser.add_argument('--use_fspt_mask', default=False, action='store_true', help='use a fronto-striato-pallido-thalamic mask to reduce the space of the second level analysis')
     parser.add_argument('--use_cortical_mask', default=False, action='store_true', help='use a cortical gm mask to reduce the space of the second level analysis')
@@ -1472,19 +884,14 @@ if __name__=='__main__':
     parser.add_argument('--use_within_group_mask', default=False, action='store_true', help='use a union of within-group masks to reduce the space of the second level analysis')
     parser.add_argument('--unzip_corr_maps', default=False, action='store_true', help='unzip correlation maps for use in SPM (not necessary if only nilearn analysis)')
     parser.add_argument('--min_time_after_scrubbing', default=None, type=float, action='store', help='minimum time (in minutes) needed per subject needed to be part of the analysis (after scrubbing (None=keep all subjects))')
-    parser.add_argument('--prep_fsl_randomise', default=False, action='store_true', help='Prepare 4D images for running FSL randomise')
-    parser.add_argument('--use_randomise', default=False, action='store_true', help='run FSL randomise -- independent from prep_fsl_randomise')
     parser.add_argument('--cluster_thresh', type=float, default=4., action='store', help="T stat to threshold to create clusters from voxel stats")
     parser.add_argument('--use_TFCE', default=False, action='store_true', help="use Threshold-Free Cluster Enhancement with randomise ")
     parser.add_argument('--OCD_minus_HC', default=False, action='store_true', help='direction of the t-test in FSL randomise -- default uses F-test')
-    parser.add_argument('--create_sphere_within_cluster', default=False, action='store_true', help='export sphere around peak within VOI cluster in prep for DCM analysis')
     parser.add_argument('--brain_smoothing_fwhm', default=8., type=none_or_float, action='store', help='brain smoothing FWHM (default 8mm as in Harrison 2009)')
     parser.add_argument('--fdr_threshold', type=float, default=0.05, action='store', help="cluster level threshold, FDR corrected")
     parser.add_argument('--fpr_threshold', type=float, default=0.001, action='store', help="cluster level threshold, uncorrected")
     parser.add_argument('--within_group_threshold', type=float, default=0.005, action='store', help="threshold to create within-group masks")
     parser.add_argument('--compute_voi_corr', default=False, action='store_true', help="compute seed to VOI correlation and print stats")
-    parser.add_argument('--non_parametric_analysis', default=False, action='store_true', help="compute between group analysis using non-parametric inference")
-    parser.add_argument('--use_SPM_mask', default=False, action='store_true', help="use within-group masks generated from SPM (one-tailed)")
     parser.add_argument('--two_sided_within_group', default=False, action='store_true', help="use two-tailed test to recreate within-group mask with parametric inference")
     parser.add_argument('--two_sided_between_group', default=False, action='store_true', help="use two-tailed test for between-group analysis with parametric inference")
     parser.add_argument('--n_perm', type=int, default=5000, action='store', help="number of permutation for non-parametric analysis")
@@ -1514,7 +921,6 @@ if __name__=='__main__':
         subjs = pd.Series([args.subj])
     else:
         subjs = pd.read_table(os.path.join(proj_dir, 'code', 'patients_list.txt'), names=['name'])['name']
-    #subjs = pd.Series(['sub-patient04', 'sub-patient54'])
 
     # options
     #atlases= ['Harrison2009'] #['schaefer100_tianS1', 'schaefer200_tianS2', 'schaefer400_tianS4'] #schaefer400_harrison2009
@@ -1531,8 +937,6 @@ if __name__=='__main__':
     args.in_dir = os.path.join(proj_dir, 'postprocessing/SPM/input_imgs/', args.seed_type, pre_metric)
     os.makedirs(args.in_dir, exist_ok=True)
 
-    #seeds = list(seed_loc.keys()) #['AccL', 'AccR', 'dCaudL', 'dCaudR', 'dPutL', 'dPutR', 'vPutL', 'vPutR', 'vCaudSupL', 'vCaudSupR', 'drPutL', 'drPutR']
-    #subrois = np.unique([seed[:-1] for seed in seeds])#['Acc', 'dCaud', 'dPut', 'vPut', 'drPut']
     seeds, subrois = get_seed_names(args)
     if args.unilateral_seed:
         if args.seed_type=='Harrison2009':
@@ -1566,26 +970,6 @@ if __name__=='__main__':
     if args.merge_LR_hemis:
         in_fnames = merge_LR_hemis(subjs, subrois, seses, metrics, seed_type=str(seedfunc[args.seed_type]), args=args)
 
-        # can only prep fsl with in_fnames from merge_LR_hemis
-        if args.prep_fsl_randomise:
-            prep_fsl_randomise(in_fnames, subrois, metrics, args)
-
-    # use randomise (independent from prep_fsl_randomise)
-    if args.use_randomise:
-        for subroi,metric,atlas in itertools.product(subrois,metrics,atlases):
-            use_randomise(subjs, subroi, atlas, metric, args)
-            if args.plot_figs:
-                plot_randomise_outputs(subjs, subroi, metric, args)
-
-    if args.run_second_level:
-        out_dir = os.path.join(baseline_dir, 'postprocessing', 'glm', pre_metric)
-        os.makedirs(out_dir, exist_ok=True)
-        args.out_dir = out_dir
-        glm_results = run_second_level(subjs, metrics, subrois, args)
-
-        if args.plot_within_group_masks:
-            plot_within_group_masks(subrois, glm_results, args)
-
     if args.compute_voi_corr:
         df_voi_corr = compute_voi_corr(subjs, seeds=subrois, args=args)
         print_voi_stats(df_voi_corr, seeds=subrois, args=args)
@@ -1602,28 +986,7 @@ if __name__=='__main__':
             with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr_'+save_suffix+'.pkl'), 'wb') as f:
                 pickle.dump(df_voi_corr,f)
 
-    if args.non_parametric_analysis:
-        suffix = 'non_parametric'
-        if args.two_sided_within_group:
-            suffix += '_within2tailed'
-        if args.two_sided_between_group:
-            suffix += '_between2tailed'
-
-        np_results = dict()
-        for seed,metric in itertools.product(subrois, metrics):
-            neg_log_pvals, mask = non_parametric_analysis(subjs, seed, metric, pre_metric, args=args, masks=[])
-            plot_non_param_maps(neg_log_pvals, seed, suffix, args)
-            np_results[seed] = {'neg_log_pvals':neg_log_pvals, 'mask':mask}
-
-        if args.save_outputs:
-            with gzip.open(os.path.join(baseline_dir, 'postprocessing', 'non_parametric', suffix+'.pkl.gz'), 'wb') as f:
-                pickle.dump(np_results,f)
-
-    if args.within_mask_corr:
-        df_mask_corr = compute_FC_within_masks(subjs, np_results, args=args)
-        if args.plot_figs:
-            plot_within_mask_corr(df_mask_corr, args=args)
-
+    
     if args.compute_ALFF:
         if len(subjs) > 1:
             df_lines = Parallel(n_jobs=args.n_jobs, verbose=1)(delayed(compute_ALFF)(subj,args) for subj in subjs)
