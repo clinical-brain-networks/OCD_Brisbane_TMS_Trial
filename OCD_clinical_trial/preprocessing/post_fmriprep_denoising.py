@@ -66,11 +66,11 @@ for ses in ['ses-pre', 'ses-post']:
 
     # list the models I would like to run:
 
-    pipelines = {'detrend_filtered_scrubFD05': { 'niipath': rest_nii,
+    pipelines = {'detrend_gsr_filtered_scrubFD05': { 'niipath': rest_nii,
                                                   'maskpath': rest_msk,
                                                   'tsvpath': rest_tsv,
                                                   'add_orig_mean_img': True,
-                                                  'confound_list': [],
+                                                  'confound_list': ['global_signal'],
                                                   'detrend': True,
                                                   'fmw_disp_th': 0.5,
                                                   'fwhm': 0,

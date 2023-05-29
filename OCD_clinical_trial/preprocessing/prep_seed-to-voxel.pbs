@@ -32,8 +32,8 @@ IDX=$((PBS_ARRAY_INDEX-1))  # double parenthesis needed for arithmetic operation
 subj=${subj_array[$IDX]}
 echo "Current subject: " ${subj}
 
-#echo 'Denoising '${subj}
-#python ${proj_dir}code/OCD_clinical_trial/preprocessing/post_fmriprep_denoising.py ${subj}
+echo 'Denoising '${subj}
+python ${proj_dir}code/OCD_clinical_trial/preprocessing/post_fmriprep_denoising.py ${subj}
 
 
 echo 'Preparing '$subj' for seed-to-voxel analysis'

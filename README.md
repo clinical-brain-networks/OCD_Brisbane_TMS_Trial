@@ -24,12 +24,12 @@ Table of contents
 
 It is strongly advised to install the package in a new virtual environment using python 3.9:
 
-    pyenv install 3.9.7 OCDenv
+    pyenv install 3.9.16 OCDenv
     pyenv activate OCDenv
 
 Then from the root of the OCDbaseline source repository (where the `setup.py` is located), type
 
-    pip install -e .1
+    pip install -e .
 
 
 ## Usage
@@ -37,7 +37,7 @@ This work is an extension of the OCD baseline analysis ([Naze et al. (2022)](htt
 
 The project is packaged in this repository and have dependencies from the baseline repo/package. 
 
-It is organized as follows:
+The code performs:
 - functional connectivity analysis: to perform seed-to-voxel analysis of neuroimaging data (fMRI) active vs. sham.
 - power analysis: to analyze fractional amplitude low-frequency fluctuations (fALFF) differences between active and sham.
 - network-based statistics: 
@@ -46,7 +46,7 @@ It is organized as follows:
 ## Functional connectivity and fractional amplitude low-frequency fluctuations analysis
 > The functional analysis assumes that [fMRIPrep](https://github.com/nipreps/fmriprep) has already been run. Before running the following scripts, ensure that the path to the project directory `proj_dir` is correctly set in those scripts and that the output folder `derivatives` has been generated from fMRIPrep with its adequate content.
 
-To perform several preprocessing steps (denoising, filtering, global signal regression, scrubbing, etc.); from the HPC cluster run the following PBS script
+To perform several preprocessing steps (denoising, filtering, global signal regression, scrubbing, etc.); from the HPC cluster, run the following PBS script
 
     preprocessing/prep_seed-to-voxel.pbs
 
@@ -58,7 +58,7 @@ The analysis focuses:
 1) on the changes of functional connectivity between the nucleus accumbens (NAcc) and the stimulation site in the orbito-frontal cortex (OFC), before and after treatment. 
 2) on the change in BOLD signal power within the stimulation site , before and after treatment. 
 
-To extract those using a 5mm radius and a full-width half maxima spatial smoothing of 8mm, plot the kernel density extimates of the outputs and run the statistical analysis (repeated measure ANOVA), run:
+To extract those using a 5mm radius and a full-width half maxima spatial smoothing of 8mm, plot the kernel density extimates of the outputs and run the statistical analysis (two-way mixed ANOVA), run:
 
     python functional/seed_to_voxel_analysis.py --compute_voi_corr --compute_ALFF --stim_radius 5 --brain_smoothing_fwhm 8 --save_outputs --plot_pointplot --print_stats
 
