@@ -156,11 +156,13 @@ def fix_session_entries(df):
 
     def get_ses(session):
         for ses in valid_ses:
-            if ses in session:
+            if ses==session:
                 return ses
+            else:
+                return np.NaN
         
     df['session'] = [get_ses(session) for session in df['Pre/Post/6mnth']]
-    return df
+    return df.dropna()
 
 
 def create_df_ybocs_dims():
@@ -199,6 +201,9 @@ def print_stat_pre_post_between_groups(df, dims):
         print("\n"+dim+':')
         mixed = pg.mixed_anova(data=df.dropna(), dv=dim, within='session', between='group', subject='subj')
         pg.print_table(mixed)
+        posthocs = pg.pairwise_ttests(data=df.dropna(), dv=dim, within='session', between='group', subject='subj')
+        pg.print_table(posthocs)
+
 
 
 def plot_ybocs_dims_to_fc(df):
@@ -272,7 +277,7 @@ if __name__=='__main__':
     if args.print_ybocs_stats:
         print_stat_pre_post_between_groups(df, checklist_2dims)
     if args.plot_ybocs_dims_to_fc:
-        plot_ybocs_dims_to_fc()
+        plot_ybocs_dims_to_fc(df)
     if args.print_ybocs_dims_table:
         print_ybocs_dims_table(df[df.session=='Pre'].dropna())
 
