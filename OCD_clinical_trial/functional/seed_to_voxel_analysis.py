@@ -860,8 +860,28 @@ def print_stats(df_summary, args):
         pg.print_table(posthocs)
 
 
-
-
+def load_df_summary(args):
+    """ loads final results """
+    if (('df_alff' not in locals()) & ('df_alff' not in globals())):
+        save_suffix = '_'.join([metrics[0],args.seed_type,args.fwhm])
+        if not args.use_group_avg_stim_site:
+            save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
+        with open(os.path.join(proj_dir, 'postprocessing', 'df_alff_'+save_suffix+'.pkl'), 'rb') as f:
+            df_alff = pickle.load(f)
+    if (('df_voi_corr' not in locals()) & ('df_voi_corr' not in globals())):
+        save_suffix = '_'.join([metrics[0],args.seed_type,args.fwhm])
+        if args.unilateral_seed:
+            save_suffix += '_unilateral'
+        else:
+            save_suffix += '_bilateral'
+        if not args.use_group_avg_stim_site:
+            save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
+        with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr_'+save_suffix+'.pkl'), 'rb') as f:
+            df_voi_corr = pickle.load(f)
+    with open(os.path.join(proj_dir, 'postprocessing', 'df_pat.pkl'), 'rb') as f:
+        df_pat = pickle.load(f)
+    df_summary = df_alff.merge(df_voi_corr).merge(df_pat)
+    return df_summary, df_alff, df_voi_corr, df_pat
 
 
 if __name__=='__main__':
@@ -1021,27 +1041,9 @@ if __name__=='__main__':
             with open(os.path.join(proj_dir, 'postprocessing', 'nbs'+save_suffix+'.pkl'), 'wb') as f:
                 pickle.dump(out_nbs,f)
 
+    df_summary, df_alff, df_voi_corr, df_pat = load_df_summary(args)
+
     if args.plot_pointplot:
-        # loadings
-        if (('df_alff' not in locals()) & ('df_alff' not in globals())):
-            save_suffix = '_'.join([metrics[0],args.seed_type,args.fwhm])
-            if not args.use_group_avg_stim_site:
-                save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_alff_'+save_suffix+'.pkl'), 'rb') as f:
-                df_alff = pickle.load(f)
-        if (('df_voi_corr' not in locals()) & ('df_voi_corr' not in globals())):
-            save_suffix = '_'.join([metrics[0],args.seed_type,args.fwhm])
-            if args.unilateral_seed:
-                save_suffix += '_unilateral'
-            else:
-                save_suffix += '_bilateral'
-            if not args.use_group_avg_stim_site:
-                save_suffix += '_indStimSite_{}mm_diameter'.format(int(args.stim_radius*2))
-            with open(os.path.join(proj_dir, 'postprocessing', 'df_voi_corr_'+save_suffix+'.pkl'), 'rb') as f:
-                df_voi_corr = pickle.load(f)
-        with open(os.path.join(proj_dir, 'postprocessing', 'df_pat.pkl'), 'rb') as f:
-            df_pat = pickle.load(f)
-        df_summary = df_alff.merge(df_voi_corr).merge(df_pat)
         # plotting
         plot_pointplot(df_summary, args)
 
