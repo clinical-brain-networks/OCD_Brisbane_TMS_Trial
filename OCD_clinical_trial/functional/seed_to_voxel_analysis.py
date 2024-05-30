@@ -136,6 +136,13 @@ def get_seed_names(args):
         subrois = ['NucleusAccumbens']
     return seeds, subrois
 
+def get_subjs(args):
+    """ import subjects """
+    if args.subj!=None:
+        subjs = pd.Series([args.subj])
+    else:
+        subjs = pd.read_table(os.path.join(proj_dir, 'code', 'patients_list.txt'), names=['name'])['name']
+    return subjs
 
 def get_group(subj):
     group = df_groups[df_groups.subj==subj].group
@@ -937,10 +944,7 @@ if __name__=='__main__':
     parser.add_argument('--nbs_tail', type=str, default='both', action='store', help="NBS t-test tail (both, right or left); default=both")
     args = parser.parse_args()
 
-    if args.subj!=None:
-        subjs = pd.Series([args.subj])
-    else:
-        subjs = pd.read_table(os.path.join(proj_dir, 'code', 'patients_list.txt'), names=['name'])['name']
+    subjs = get_subjs(args)
 
     # options
     #atlases= ['Harrison2009'] #['schaefer100_tianS1', 'schaefer200_tianS2', 'schaefer400_tianS4'] #schaefer400_harrison2009
